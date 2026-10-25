@@ -167,6 +167,10 @@ bool AbyssalStorageMgr::ShouldAutoStore(Player* player, ItemTemplate const* item
     if (itemTemplate->Class != ITEM_CLASS_TRADE_GOODS && itemTemplate->Class != ITEM_CLASS_GEM)
         return false;
 
+    // Profession tools (runed enchanting rods, etc.) must stay in bags to satisfy spell totem requirements
+    if (itemTemplate->TotemCategory)
+        return false;
+
     if (IsItemRequiredByActiveQuest(player, itemTemplate->ItemId))
         return false;
 
