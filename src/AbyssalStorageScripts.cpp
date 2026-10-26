@@ -16,11 +16,20 @@
 #include "WorldSession.h"
 #include <sstream>
 
-// Returns true if the player belongs to a random playerbot account (username prefix "rndbot")
+// Returns true if the player belongs to a random playerbot account (username prefix "rndbot").
+// The account name lookup hits the login DB, so the result is cached in the player's DataMap.
 static bool IsRandomBot(Player* player)
 {
     if (!player)
         return false;
+
+    AbyssalPlayerData* data = GetAbyssalData(player);
+    if (data->randomBotChecked)
+        return data->isRandomBot;
+
+    data->randomBotChecked = true;
+    data->isRandomBot = false;
+
     uint32 accountId = player->GetSession()->GetAccountId();
     std::string username;
     if (!sAccountMgr->GetName(accountId, username))
@@ -31,7 +40,8 @@ static bool IsRandomBot(Player* player)
     std::string prefix = username.substr(0, 6);
     for (char& c : prefix)
         c = std::tolower(static_cast<unsigned char>(c));
-    return prefix == "rndbot";
+    data->isRandomBot = prefix == "rndbot";
+    return data->isRandomBot;
 }
 
 // Build a clickable item link like "|cff1eff00|Hitem:2589:0:0:0:0:0:0:0:0:0|h[Linen Cloth]|h|r"

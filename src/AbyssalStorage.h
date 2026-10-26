@@ -27,6 +27,8 @@ struct AbyssalPlayerData : public DataMap::Base
     std::vector<PendingDeposit> pendingDeposits; // deferred auto-deposits
     uint32 pendingCrafts = 0;    // remaining crafts in a multi-craft batch
     uint32 pendingSpellId = 0;   // spell ID for multi-craft batch
+    bool randomBotChecked = false; // true once isRandomBot has been resolved
+    bool isRandomBot = false;      // cached result of the rndbot account check
 };
 
 AbyssalPlayerData* GetAbyssalData(Player* player);
