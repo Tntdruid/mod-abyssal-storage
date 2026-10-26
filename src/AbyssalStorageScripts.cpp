@@ -1,10 +1,12 @@
 #include "AbyssalStorage.h"
 #include "AccountMgr.h"
+#include "CharacterCache.h"
 #include "Chat.h"
 #include "ChatCommand.h"
 #include "Config.h"
 #include "DatabaseEnv.h"
 #include "Item.h"
+#include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "Player.h"
 #include "QuestDef.h"
@@ -72,6 +74,7 @@ public:
     void OnAfterConfigLoad(bool /*reload*/) override
     {
         sAbyssalStorageMgr->SetEnabled(sConfigMgr->GetOption<bool>("AbyssalStorage.Enable", true));
+        sAbyssalStorageMgr->SetSharingEnabled(sConfigMgr->GetOption<bool>("AbyssalStorage.EnableSharing", true));
     }
 };
 
@@ -98,9 +101,17 @@ public:
         if (IsRandomBot(player))
             return;
 
-        uint32 storageId = sAbyssalStorageMgr->GetStorageId(player);
-        sAbyssalStorageMgr->LoadAccountData(storageId, player->GetGUID());
+        sAbyssalStorageMgr->LoadAccountData(player);
         sAbyssalStorageMgr->SendFullSync(player);
+
+        if (sAbyssalStorageMgr->IsSharingEnabled())
+        {
+            QueryResult invite = CharacterDatabase.Query("SELECT inviter_name FROM abyssal_storage_invite WHERE invitee_account_id = {}",
+                player->GetSession()->GetAccountId());
+            if (invite)
+                ChatHandler(player->GetSession()).PSendSysMessage("Abyssal Storage: {} has invited you to share their vault. Type .abs share accept or .abs share decline.",
+                    invite->Fetch()[0].Get<std::string>());
+        }
     }
 
     void OnPlayerLogout(Player* player) override
@@ -133,7 +144,7 @@ public:
         }
 
         // Only unloads once no other player sharing this vault is online
-        sAbyssalStorageMgr->UnloadAccountData(storageId, player->GetGUID());
+        sAbyssalStorageMgr->UnloadAccountData(player);
     }
 
     void OnPlayerStoreNewItem(Player* player, Item* item, uint32 count) override
@@ -451,8 +462,18 @@ public:
 
     ChatCommandTable GetCommands() const override
     {
+        static ChatCommandTable shareCommandTable =
+        {
+            { "list",    HandleShareListCommand,    SEC_PLAYER, Console::No },
+            { "invite",  HandleShareInviteCommand,  SEC_PLAYER, Console::No },
+            { "accept",  HandleShareAcceptCommand,  SEC_PLAYER, Console::No },
+            { "decline", HandleShareDeclineCommand, SEC_PLAYER, Console::No },
+            { "leave",   HandleShareLeaveCommand,   SEC_PLAYER, Console::No },
+            { "kick",    HandleShareKickCommand,    SEC_PLAYER, Console::No },
+        };
         static ChatCommandTable absCommandTable =
         {
+            { "share",    shareCommandTable },
             { "withdraw", HandleWithdrawCommand,  SEC_PLAYER, Console::No },
             { "deposit",  HandleDepositCommand,   SEC_PLAYER, Console::No },
             { "sync",     HandleSyncCommand,      SEC_PLAYER, Console::No },
@@ -635,8 +656,8 @@ public:
             return true;
         }
 
-        uint32 currentStorage = sAbyssalStorageMgr->LookupStorageOwner(accountId);
-        uint32 newStorage = sAbyssalStorageMgr->LookupStorageOwner(mainAccountId);
+        uint32 currentStorage = sAbyssalStorageMgr->GetStorageIdForAccount(accountId);
+        uint32 newStorage = sAbyssalStorageMgr->GetStorageIdForAccount(mainAccountId);
         if (currentStorage == newStorage)
         {
             handler->SendSysMessage("Abyssal Storage: Those accounts already share a vault.");
@@ -663,6 +684,7 @@ public:
         // Otherwise the account was linked elsewhere; the shared items stay with that vault
         trans->Append("REPLACE INTO abyssal_storage_link (account_id, owner_account_id) VALUES ({}, {})", accountId, newStorage);
         CharacterDatabase.DirectCommitTransaction(trans);
+        sAbyssalStorageMgr->ForgetAccountStorage();
 
         handler->PSendSysMessage("Abyssal Storage: Account {} now shares the vault of account {}.", accountName, mainAccountName);
         return true;
@@ -679,7 +701,7 @@ public:
             return true;
         }
 
-        uint32 currentStorage = sAbyssalStorageMgr->LookupStorageOwner(accountId);
+        uint32 currentStorage = sAbyssalStorageMgr->GetStorageIdForAccount(accountId);
         if (currentStorage == accountId)
         {
             handler->SendSysMessage("Abyssal Storage: That account is not linked to another vault.");
@@ -693,7 +715,237 @@ public:
         }
 
         CharacterDatabase.DirectExecute("DELETE FROM abyssal_storage_link WHERE account_id = {}", accountId);
+        sAbyssalStorageMgr->ForgetAccountStorage();
         handler->PSendSysMessage("Abyssal Storage: Account {} has its own vault again.", accountName);
+        return true;
+    }
+
+    // Players only ever see character names, never account names
+    static std::string GetMainCharacterName(uint32 accountId)
+    {
+        QueryResult result = CharacterDatabase.Query("SELECT name FROM characters WHERE account = {} ORDER BY totaltime DESC LIMIT 1", accountId);
+        if (!result)
+            return "#" + std::to_string(accountId);
+        return result->Fetch()[0].Get<std::string>();
+    }
+
+    static uint32 GetAccountIdByCharacterName(std::string name)
+    {
+        if (!normalizePlayerName(name))
+            return 0;
+        return sCharacterCache->GetCharacterAccountIdByName(name);
+    }
+
+    static bool HasSharedMembers(uint32 accountId)
+    {
+        return bool(CharacterDatabase.Query("SELECT 1 FROM abyssal_storage_link WHERE owner_account_id = {} LIMIT 1", accountId));
+    }
+
+    // Common checks for the .abs share commands; returns the player or nullptr
+    static Player* GetSharingPlayer(ChatHandler* handler)
+    {
+        if (!sAbyssalStorageMgr->IsEnabled())
+            return nullptr;
+
+        if (!sAbyssalStorageMgr->IsSharingEnabled())
+        {
+            handler->SendSysMessage("Abyssal Storage: Vault sharing is disabled on this server.");
+            return nullptr;
+        }
+
+        return handler->GetSession()->GetPlayer();
+    }
+
+    // .abs share list
+    static bool HandleShareListCommand(ChatHandler* handler)
+    {
+        Player* player = GetSharingPlayer(handler);
+        if (!player)
+            return true;
+
+        uint32 accountId = player->GetSession()->GetAccountId();
+        uint32 owner = sAbyssalStorageMgr->GetStorageIdForAccount(accountId);
+        if (owner != accountId)
+        {
+            handler->PSendSysMessage("Abyssal Storage: You share the vault of {}.", GetMainCharacterName(owner));
+            return true;
+        }
+
+        QueryResult result = CharacterDatabase.Query("SELECT account_id FROM abyssal_storage_link WHERE owner_account_id = {}", accountId);
+        if (!result)
+        {
+            handler->SendSysMessage("Abyssal Storage: Your vault is not shared. Use .abs share invite <character> to share it.");
+            return true;
+        }
+
+        handler->SendSysMessage("Abyssal Storage: Your vault is shared with:");
+        do
+        {
+            handler->PSendSysMessage("  {}", GetMainCharacterName(result->Fetch()[0].Get<uint32>()));
+        } while (result->NextRow());
+        return true;
+    }
+
+    // .abs share invite <character>
+    // Invites the account of <character> to use your vault
+    static bool HandleShareInviteCommand(ChatHandler* handler, std::string characterName)
+    {
+        Player* player = GetSharingPlayer(handler);
+        if (!player)
+            return true;
+
+        uint32 accountId = player->GetSession()->GetAccountId();
+        if (sAbyssalStorageMgr->GetStorageIdForAccount(accountId) != accountId)
+        {
+            handler->SendSysMessage("Abyssal Storage: You use someone else's vault. Leave it with .abs share leave before inviting others.");
+            return true;
+        }
+
+        uint32 inviteeId = GetAccountIdByCharacterName(characterName);
+        if (!inviteeId)
+        {
+            handler->SendSysMessage("Abyssal Storage: Character not found.");
+            return true;
+        }
+
+        if (inviteeId == accountId)
+        {
+            handler->SendSysMessage("Abyssal Storage: That character is on your own account and already uses your vault.");
+            return true;
+        }
+
+        if (sAbyssalStorageMgr->GetStorageIdForAccount(inviteeId) != inviteeId || HasSharedMembers(inviteeId))
+        {
+            handler->SendSysMessage("Abyssal Storage: That character already shares a vault with someone.");
+            return true;
+        }
+
+        CharacterDatabase.DirectExecute("REPLACE INTO abyssal_storage_invite (invitee_account_id, inviter_account_id, inviter_name) VALUES ({}, {}, '{}')",
+            inviteeId, accountId, player->GetName());
+
+        normalizePlayerName(characterName);
+        if (Player* invitee = ObjectAccessor::FindPlayerByName(characterName))
+            ChatHandler(invitee->GetSession()).PSendSysMessage("Abyssal Storage: {} has invited you to share their vault. Type .abs share accept or .abs share decline.",
+                player->GetName());
+
+        handler->PSendSysMessage("Abyssal Storage: Invited {}. They can accept with .abs share accept.", characterName);
+        return true;
+    }
+
+    // .abs share accept
+    // Joins the inviter's vault. Your current vault contents are merged into it.
+    static bool HandleShareAcceptCommand(ChatHandler* handler)
+    {
+        Player* player = GetSharingPlayer(handler);
+        if (!player)
+            return true;
+
+        uint32 accountId = player->GetSession()->GetAccountId();
+        QueryResult invite = CharacterDatabase.Query("SELECT inviter_account_id, inviter_name FROM abyssal_storage_invite WHERE invitee_account_id = {}", accountId);
+        if (!invite)
+        {
+            handler->SendSysMessage("Abyssal Storage: You have no pending invite.");
+            return true;
+        }
+
+        uint32 ownerId = invite->Fetch()[0].Get<uint32>();
+        std::string ownerName = invite->Fetch()[1].Get<std::string>();
+
+        // Merging is only safe while this player is the vault's only user
+        if (sAbyssalStorageMgr->GetStorageIdForAccount(accountId) != accountId || HasSharedMembers(accountId))
+        {
+            handler->SendSysMessage("Abyssal Storage: You already share a vault. Leave it with .abs share leave first.");
+            return true;
+        }
+
+        if (sAbyssalStorageMgr->GetStorageIdForAccount(ownerId) != ownerId)
+        {
+            CharacterDatabase.DirectExecute("DELETE FROM abyssal_storage_invite WHERE invitee_account_id = {}", accountId);
+            handler->SendSysMessage("Abyssal Storage: The inviter no longer owns a vault. The invite was removed.");
+            return true;
+        }
+
+        // Queued (not direct) so it runs after any deposits this player still has queued
+        CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+        trans->Append("INSERT INTO abyssal_storage (account_id, item_entry, count) "
+            "SELECT {}, src.item_entry, src.count FROM (SELECT item_entry, count FROM abyssal_storage WHERE account_id = {}) AS src "
+            "ON DUPLICATE KEY UPDATE count = abyssal_storage.count + src.count", ownerId, accountId);
+        trans->Append("DELETE FROM abyssal_storage WHERE account_id = {}", accountId);
+        trans->Append("REPLACE INTO abyssal_storage_link (account_id, owner_account_id) VALUES ({}, {})", accountId, ownerId);
+        trans->Append("DELETE FROM abyssal_storage_invite WHERE invitee_account_id = {}", accountId);
+        CharacterDatabase.CommitTransaction(trans);
+
+        sAbyssalStorageMgr->SwitchAccountStorage(accountId, ownerId, true);
+
+        handler->PSendSysMessage("Abyssal Storage: You now share the vault of {}. Your items were added to it.", ownerName);
+        if (Player* owner = ObjectAccessor::FindPlayerByName(ownerName))
+            ChatHandler(owner->GetSession()).PSendSysMessage("Abyssal Storage: {} now shares your vault.", player->GetName());
+        return true;
+    }
+
+    // .abs share decline
+    static bool HandleShareDeclineCommand(ChatHandler* handler)
+    {
+        Player* player = GetSharingPlayer(handler);
+        if (!player)
+            return true;
+
+        uint32 accountId = player->GetSession()->GetAccountId();
+        if (!CharacterDatabase.Query("SELECT 1 FROM abyssal_storage_invite WHERE invitee_account_id = {}", accountId))
+        {
+            handler->SendSysMessage("Abyssal Storage: You have no pending invite.");
+            return true;
+        }
+
+        CharacterDatabase.DirectExecute("DELETE FROM abyssal_storage_invite WHERE invitee_account_id = {}", accountId);
+        handler->SendSysMessage("Abyssal Storage: Invite declined.");
+        return true;
+    }
+
+    // .abs share leave
+    // Stops using the shared vault. The shared items stay in it; you start with an empty vault.
+    static bool HandleShareLeaveCommand(ChatHandler* handler)
+    {
+        Player* player = GetSharingPlayer(handler);
+        if (!player)
+            return true;
+
+        uint32 accountId = player->GetSession()->GetAccountId();
+        if (sAbyssalStorageMgr->GetStorageIdForAccount(accountId) == accountId)
+        {
+            handler->SendSysMessage("Abyssal Storage: You are not using someone else's vault.");
+            return true;
+        }
+
+        CharacterDatabase.DirectExecute("DELETE FROM abyssal_storage_link WHERE account_id = {}", accountId);
+        sAbyssalStorageMgr->SwitchAccountStorage(accountId, accountId, false);
+
+        handler->SendSysMessage("Abyssal Storage: You left the shared vault. The shared items stay with its owner.");
+        return true;
+    }
+
+    // .abs share kick <character>
+    // Removes the account of <character> from your vault
+    static bool HandleShareKickCommand(ChatHandler* handler, std::string characterName)
+    {
+        Player* player = GetSharingPlayer(handler);
+        if (!player)
+            return true;
+
+        uint32 accountId = player->GetSession()->GetAccountId();
+        uint32 memberId = GetAccountIdByCharacterName(characterName);
+        if (!memberId || memberId == accountId || sAbyssalStorageMgr->GetStorageIdForAccount(memberId) != accountId
+            || sAbyssalStorageMgr->GetStorageIdForAccount(accountId) != accountId)
+        {
+            handler->SendSysMessage("Abyssal Storage: That character does not share your vault.");
+            return true;
+        }
+
+        CharacterDatabase.DirectExecute("DELETE FROM abyssal_storage_link WHERE account_id = {} AND owner_account_id = {}", memberId, accountId);
+        // Moves their online characters to their own (empty) vault right away
+        sAbyssalStorageMgr->SwitchAccountStorage(memberId, memberId, false);
+
+        handler->PSendSysMessage("Abyssal Storage: Removed {} from your vault.", characterName);
         return true;
     }
 

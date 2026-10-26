@@ -12,3 +12,14 @@
 #
 
 AbyssalStorage.Enable = 1
+
+#
+#    AbyssalStorage.EnableSharing
+#        Description: Let players share one vault between accounts without a GM, using
+#                     .abs share invite/accept/decline/leave/kick. GMs can always link
+#                     accounts with .abs link, whatever this is set to.
+#        Default:     1 (Enabled)
+#                     0 (Disabled)
+#
+
+AbyssalStorage.EnableSharing = 1

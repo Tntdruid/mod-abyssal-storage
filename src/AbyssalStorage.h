@@ -5,6 +5,7 @@
 #include "Define.h"
 #include "ObjectGuid.h"
 #include <unordered_map>
+#include <map>
 #include <set>
 #include <mutex>
 #include <string>
@@ -30,7 +31,6 @@ struct AbyssalPlayerData : public DataMap::Base
     uint32 pendingSpellId = 0;   // spell ID for multi-craft batch
     bool randomBotChecked = false; // true once isRandomBot has been resolved
     bool isRandomBot = false;      // cached result of the rndbot account check
-    uint32 storageId = 0;          // account whose vault this player uses (0 = not resolved yet)
 };
 
 AbyssalPlayerData* GetAbyssalData(Player* player);
@@ -43,12 +43,20 @@ public:
     // Shared storage: linked accounts use the vault of their owner account.
     // All storage calls below take a storage id, not the player's own account id.
     uint32 GetStorageId(Player* player);
+    uint32 GetStorageIdForAccount(uint32 accountId);
+    // Reads the link table directly, bypassing the cache
     uint32 LookupStorageOwner(uint32 accountId);
+    // Drop all cached account -> vault mappings (after links were changed directly in the DB)
+    void ForgetAccountStorage();
 
     // Each online player using a vault holds a reference; it is unloaded when the last one leaves
-    void LoadAccountData(uint32 storageId, ObjectGuid playerGuid);
-    void UnloadAccountData(uint32 storageId, ObjectGuid playerGuid);
+    void LoadAccountData(Player* player);
+    void UnloadAccountData(Player* player);
     bool IsAccountLoaded(uint32 storageId);
+
+    // Point an account at another vault and move its online characters along.
+    // With mergeItems, the old vault's contents move too (only safe when no other account uses it).
+    void SwitchAccountStorage(uint32 accountId, uint32 newStorageId, bool mergeItems);
 
     void DepositItem(uint32 accountId, uint32 itemEntry, uint32 count);
     bool WithdrawItem(uint32 accountId, uint32 itemEntry, uint32 count);
@@ -69,16 +77,23 @@ public:
 
     bool IsEnabled() const { return _enabled; }
     void SetEnabled(bool enabled) { _enabled = enabled; }
+    bool IsSharingEnabled() const { return _sharingEnabled; }
+    void SetSharingEnabled(bool enabled) { _sharingEnabled = enabled; }
 
 private:
     AbyssalStorageMgr() = default;
 
-    // accountId -> (itemEntry -> count)
+    std::unordered_map<uint32, uint32> QueryStorageItems(uint32 storageId);
+
+    // storageId -> (itemEntry -> count)
     std::unordered_map<uint32, std::unordered_map<uint32, uint32>> _storage;
-    // storageId -> online players using that vault
-    std::unordered_map<uint32, std::set<ObjectGuid>> _members;
+    // storageId -> (online player -> their account id)
+    std::unordered_map<uint32, std::map<ObjectGuid, uint32>> _members;
+    // accountId -> storageId
+    std::unordered_map<uint32, uint32> _accountStorage;
     std::mutex _storageMutex;
     bool _enabled = true;
+    bool _sharingEnabled = true;
 };
 
 #define sAbyssalStorageMgr AbyssalStorageMgr::instance()

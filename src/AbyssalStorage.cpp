@@ -34,23 +34,33 @@ uint32 AbyssalStorageMgr::LookupStorageOwner(uint32 accountId)
 
 uint32 AbyssalStorageMgr::GetStorageId(Player* player)
 {
-    // Resolved once per login and cached, since it needs a DB lookup
-    AbyssalPlayerData* data = GetAbyssalData(player);
-    if (!data->storageId)
-        data->storageId = LookupStorageOwner(player->GetSession()->GetAccountId());
-
-    return data->storageId;
+    return GetStorageIdForAccount(player->GetSession()->GetAccountId());
 }
 
-void AbyssalStorageMgr::LoadAccountData(uint32 storageId, ObjectGuid playerGuid)
+uint32 AbyssalStorageMgr::GetStorageIdForAccount(uint32 accountId)
 {
     {
         std::lock_guard<std::mutex> lock(_storageMutex);
-        _members[storageId].insert(playerGuid);
-        if (_storage.find(storageId) != _storage.end())
-            return; // already loaded
+        auto it = _accountStorage.find(accountId);
+        if (it != _accountStorage.end())
+            return it->second;
     }
 
+    // Cached after the first lookup, since it needs a DB query
+    uint32 storageId = LookupStorageOwner(accountId);
+
+    std::lock_guard<std::mutex> lock(_storageMutex);
+    return _accountStorage.emplace(accountId, storageId).first->second;
+}
+
+void AbyssalStorageMgr::ForgetAccountStorage()
+{
+    std::lock_guard<std::mutex> lock(_storageMutex);
+    _accountStorage.clear();
+}
+
+std::unordered_map<uint32, uint32> AbyssalStorageMgr::QueryStorageItems(uint32 storageId)
+{
     QueryResult result = CharacterDatabase.Query("SELECT item_entry, count FROM abyssal_storage WHERE account_id = {}", storageId);
 
     std::unordered_map<uint32, uint32> items;
@@ -65,19 +75,38 @@ void AbyssalStorageMgr::LoadAccountData(uint32 storageId, ObjectGuid playerGuid)
         } while (result->NextRow());
     }
 
+    return items;
+}
+
+void AbyssalStorageMgr::LoadAccountData(Player* player)
+{
+    uint32 accountId = player->GetSession()->GetAccountId();
+    uint32 storageId = GetStorageIdForAccount(accountId);
+
+    {
+        std::lock_guard<std::mutex> lock(_storageMutex);
+        _members[storageId][player->GetGUID()] = accountId;
+        if (_storage.find(storageId) != _storage.end())
+            return; // already loaded
+    }
+
+    auto items = QueryStorageItems(storageId);
+
     std::lock_guard<std::mutex> lock(_storageMutex);
     // Another player on the same vault may have loaded it while we queried
     _storage.emplace(storageId, std::move(items));
 }
 
-void AbyssalStorageMgr::UnloadAccountData(uint32 storageId, ObjectGuid playerGuid)
+void AbyssalStorageMgr::UnloadAccountData(Player* player)
 {
+    uint32 storageId = GetStorageId(player);
+
     std::lock_guard<std::mutex> lock(_storageMutex);
 
     auto it = _members.find(storageId);
     if (it != _members.end())
     {
-        it->second.erase(playerGuid);
+        it->second.erase(player->GetGUID());
         if (!it->second.empty())
             return; // still in use by other players sharing this vault
         _members.erase(it);
@@ -90,6 +119,76 @@ bool AbyssalStorageMgr::IsAccountLoaded(uint32 storageId)
 {
     std::lock_guard<std::mutex> lock(_storageMutex);
     return _storage.find(storageId) != _storage.end();
+}
+
+void AbyssalStorageMgr::SwitchAccountStorage(uint32 accountId, uint32 newStorageId, bool mergeItems)
+{
+    uint32 oldStorageId = GetStorageIdForAccount(accountId);
+    if (oldStorageId == newStorageId)
+        return;
+
+    // Load the new vault up front if it is not in memory; the DB query must run outside the lock
+    std::unordered_map<uint32, uint32> newItems;
+    bool newLoaded = IsAccountLoaded(newStorageId);
+    if (!newLoaded)
+        newItems = QueryStorageItems(newStorageId);
+
+    std::vector<ObjectGuid> movedPlayers;
+    std::vector<uint32> mergedEntries;
+    {
+        std::lock_guard<std::mutex> lock(_storageMutex);
+        _accountStorage[accountId] = newStorageId;
+
+        // Every online character of the account moves, including playerbots on the same account
+        auto oldMembers = _members.find(oldStorageId);
+        if (oldMembers != _members.end())
+        {
+            for (auto it = oldMembers->second.begin(); it != oldMembers->second.end();)
+            {
+                if (it->second == accountId)
+                {
+                    movedPlayers.push_back(it->first);
+                    _members[newStorageId][it->first] = accountId;
+                    it = oldMembers->second.erase(it);
+                }
+                else
+                    ++it;
+            }
+        }
+
+        if (!movedPlayers.empty())
+            _storage.emplace(newStorageId, std::move(newItems));
+
+        auto oldStorage = _storage.find(oldStorageId);
+        if (mergeItems && oldStorage != _storage.end())
+        {
+            auto newStorage = _storage.find(newStorageId);
+            if (newStorage != _storage.end())
+            {
+                for (auto const& [entry, count] : oldStorage->second)
+                {
+                    newStorage->second[entry] += count;
+                    mergedEntries.push_back(entry);
+                }
+            }
+            oldStorage->second.clear();
+        }
+
+        oldMembers = _members.find(oldStorageId);
+        if (oldMembers != _members.end() && oldMembers->second.empty())
+        {
+            _members.erase(oldMembers);
+            _storage.erase(oldStorageId);
+        }
+    }
+
+    for (ObjectGuid const& guid : movedPlayers)
+        if (Player* moved = ObjectAccessor::FindConnectedPlayer(guid))
+            SendFullSync(moved);
+
+    // Let the others already sharing the new vault see the merged items
+    for (uint32 entry : mergedEntries)
+        BroadcastItemCount(newStorageId, entry);
 }
 
 void AbyssalStorageMgr::DepositItem(uint32 accountId, uint32 itemEntry, uint32 count)
@@ -324,13 +423,14 @@ void AbyssalStorageMgr::BroadcastItemCount(uint32 storageId, uint32 itemEntry)
 {
     uint32 count = GetItemCount(storageId, itemEntry);
 
-    std::set<ObjectGuid> members;
+    std::vector<ObjectGuid> members;
     {
         std::lock_guard<std::mutex> lock(_storageMutex);
         auto it = _members.find(storageId);
         if (it == _members.end())
             return;
-        members = it->second;
+        for (auto const& [guid, accountId] : it->second)
+            members.push_back(guid);
     }
 
     // The addon treats an update with count 0 as a delete
