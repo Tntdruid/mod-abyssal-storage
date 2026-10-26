@@ -22,6 +22,17 @@ Automatically deposits trade goods into a shared vault accessible by all charact
 | `/abs withdraw <itemId> [count]` | Withdraw items (omit count for all) |
 | `/abs sync` | Force re-sync from server |
 
+### Sharing a vault between accounts (GM)
+
+Accounts can share one vault, for example when one player runs a whole raid team across several accounts. These commands need administrator rights and also work from the worldserver console. All characters using the affected vaults must be logged out.
+
+| Command | Description |
+|---|---|
+| `.abs link <account> <mainAccount>` | Make `<account>` use the vault of `<mainAccount>`. Its own items are merged into the shared vault. |
+| `.abs unlink <account>` | Give `<account>` its own, empty vault again. The shared items stay in the shared vault. |
+
+Example: `.abs link raider02 raider01`, `.abs link raider03 raider01`, and so on.
+
 ## Configuration
 
 In `mod_abyssal_storage.conf`:
@@ -35,5 +46,5 @@ AbyssalStorage.Enable = 1
 1. Clone into `modules/mod-abyssal-storage`
 2. Re-run CMake and build
 3. Copy `conf/mod_abyssal_storage.conf.dist` to your server's config directory
-4. Run `data/sql/db-characters/abyssal_storage.sql` against your characters database
+4. Run `data/sql/db-characters/abyssal_storage.sql` and `data/sql/db-characters/abyssal_storage_link.sql` against your characters database
 5. Copy the `addon/AbyssalStorage` folder into your WoW `Interface/AddOns` directory

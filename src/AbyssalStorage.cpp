@@ -5,6 +5,7 @@
 #include "WorldPacket.h"
 #include "WorldSession.h"
 #include "Chat.h"
+#include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "QuestDef.h"
 #include "Log.h"
@@ -22,15 +23,35 @@ AbyssalStorageMgr* AbyssalStorageMgr::instance()
     return &instance;
 }
 
-void AbyssalStorageMgr::LoadAccountData(uint32 accountId)
+uint32 AbyssalStorageMgr::LookupStorageOwner(uint32 accountId)
+{
+    QueryResult result = CharacterDatabase.Query("SELECT owner_account_id FROM abyssal_storage_link WHERE account_id = {}", accountId);
+    if (!result)
+        return accountId;
+
+    return result->Fetch()[0].Get<uint32>();
+}
+
+uint32 AbyssalStorageMgr::GetStorageId(Player* player)
+{
+    // Resolved once per login and cached, since it needs a DB lookup
+    AbyssalPlayerData* data = GetAbyssalData(player);
+    if (!data->storageId)
+        data->storageId = LookupStorageOwner(player->GetSession()->GetAccountId());
+
+    return data->storageId;
+}
+
+void AbyssalStorageMgr::LoadAccountData(uint32 storageId, ObjectGuid playerGuid)
 {
     {
         std::lock_guard<std::mutex> lock(_storageMutex);
-        if (_storage.find(accountId) != _storage.end())
+        _members[storageId].insert(playerGuid);
+        if (_storage.find(storageId) != _storage.end())
             return; // already loaded
     }
 
-    QueryResult result = CharacterDatabase.Query("SELECT item_entry, count FROM abyssal_storage WHERE account_id = {}", accountId);
+    QueryResult result = CharacterDatabase.Query("SELECT item_entry, count FROM abyssal_storage WHERE account_id = {}", storageId);
 
     std::unordered_map<uint32, uint32> items;
     if (result)
@@ -45,19 +66,30 @@ void AbyssalStorageMgr::LoadAccountData(uint32 accountId)
     }
 
     std::lock_guard<std::mutex> lock(_storageMutex);
-    _storage[accountId] = std::move(items);
+    // Another player on the same vault may have loaded it while we queried
+    _storage.emplace(storageId, std::move(items));
 }
 
-void AbyssalStorageMgr::UnloadAccountData(uint32 accountId)
+void AbyssalStorageMgr::UnloadAccountData(uint32 storageId, ObjectGuid playerGuid)
 {
     std::lock_guard<std::mutex> lock(_storageMutex);
-    _storage.erase(accountId);
+
+    auto it = _members.find(storageId);
+    if (it != _members.end())
+    {
+        it->second.erase(playerGuid);
+        if (!it->second.empty())
+            return; // still in use by other players sharing this vault
+        _members.erase(it);
+    }
+
+    _storage.erase(storageId);
 }
 
-bool AbyssalStorageMgr::IsAccountLoaded(uint32 accountId)
+bool AbyssalStorageMgr::IsAccountLoaded(uint32 storageId)
 {
     std::lock_guard<std::mutex> lock(_storageMutex);
-    return _storage.find(accountId) != _storage.end();
+    return _storage.find(storageId) != _storage.end();
 }
 
 void AbyssalStorageMgr::DepositItem(uint32 accountId, uint32 itemEntry, uint32 count)
@@ -255,8 +287,7 @@ void AbyssalStorageMgr::SendAddonMessage(Player* player, std::string const& mess
 
 void AbyssalStorageMgr::SendFullSync(Player* player)
 {
-    uint32 accountId = player->GetSession()->GetAccountId();
-    auto items = GetAllItems(accountId);
+    auto items = GetAllItems(GetStorageId(player));
 
     if (items.empty())
     {
@@ -287,4 +318,23 @@ void AbyssalStorageMgr::SendItemDelete(Player* player, uint32 itemEntry)
 {
     std::string msg = "DEL:" + std::to_string(itemEntry);
     SendAddonMessage(player, msg);
+}
+
+void AbyssalStorageMgr::BroadcastItemCount(uint32 storageId, uint32 itemEntry)
+{
+    uint32 count = GetItemCount(storageId, itemEntry);
+
+    std::set<ObjectGuid> members;
+    {
+        std::lock_guard<std::mutex> lock(_storageMutex);
+        auto it = _members.find(storageId);
+        if (it == _members.end())
+            return;
+        members = it->second;
+    }
+
+    // The addon treats an update with count 0 as a delete
+    for (ObjectGuid const& guid : members)
+        if (Player* member = ObjectAccessor::FindConnectedPlayer(guid))
+            SendItemUpdate(member, itemEntry, count);
 }

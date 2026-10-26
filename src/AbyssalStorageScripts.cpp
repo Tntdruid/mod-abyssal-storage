@@ -12,6 +12,7 @@
 #include "Spell.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
+#include "Util.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
 #include <sstream>
@@ -97,8 +98,8 @@ public:
         if (IsRandomBot(player))
             return;
 
-        uint32 accountId = player->GetSession()->GetAccountId();
-        sAbyssalStorageMgr->LoadAccountData(accountId);
+        uint32 storageId = sAbyssalStorageMgr->GetStorageId(player);
+        sAbyssalStorageMgr->LoadAccountData(storageId, player->GetGUID());
         sAbyssalStorageMgr->SendFullSync(player);
     }
 
@@ -110,7 +111,7 @@ public:
         if (IsRandomBot(player))
             return;
 
-        uint32 accountId = player->GetSession()->GetAccountId();
+        uint32 storageId = sAbyssalStorageMgr->GetStorageId(player);
         AbyssalPlayerData* data = GetAbyssalData(player);
 
         // Re-vault any materialized items still in inventory
@@ -124,16 +125,15 @@ public:
                     uint32 entry = item->GetEntry();
                     uint32 count = item->GetCount();
                     player->DestroyItemCount(entry, count, true);
-                    sAbyssalStorageMgr->DepositItem(accountId, entry, count);
+                    sAbyssalStorageMgr->DepositItem(storageId, entry, count);
+                    sAbyssalStorageMgr->BroadcastItemCount(storageId, entry);
                 }
             }
             data->materializedItems.clear();
         }
 
-        // Check if any other character on this account is online
-        // For simplicity, always unload — LoadAccountData will re-cache on next login
-        // A more efficient approach would reference-count, but this is safe
-        sAbyssalStorageMgr->UnloadAccountData(accountId);
+        // Only unloads once no other player sharing this vault is online
+        sAbyssalStorageMgr->UnloadAccountData(storageId, player->GetGUID());
     }
 
     void OnPlayerStoreNewItem(Player* player, Item* item, uint32 count) override
@@ -181,7 +181,7 @@ public:
         std::vector<PendingDeposit> deposits = std::move(data->pendingDeposits);
         data->pendingDeposits.clear();
 
-        uint32 accountId = player->GetSession()->GetAccountId();
+        uint32 storageId = sAbyssalStorageMgr->GetStorageId(player);
 
         for (auto const& dep : deposits)
         {
@@ -199,10 +199,8 @@ public:
             toDeposit = std::min(toDeposit, playerHas - questReserved);
 
             player->DestroyItemCount(dep.itemEntry, toDeposit, true);
-            sAbyssalStorageMgr->DepositItem(accountId, dep.itemEntry, toDeposit);
-
-            uint32 newTotal = sAbyssalStorageMgr->GetItemCount(accountId, dep.itemEntry);
-            sAbyssalStorageMgr->SendItemUpdate(player, dep.itemEntry, newTotal);
+            sAbyssalStorageMgr->DepositItem(storageId, dep.itemEntry, toDeposit);
+            sAbyssalStorageMgr->BroadcastItemCount(storageId, dep.itemEntry);
         }
     }
 
@@ -225,7 +223,7 @@ public:
         if (!quest)
             return true;
 
-        uint32 accountId = player->GetSession()->GetAccountId();
+        uint32 storageId = sAbyssalStorageMgr->GetStorageId(player);
 
         if (data)
             data->isMaterializing = true;
@@ -242,7 +240,7 @@ public:
                 continue;
 
             uint32 deficit = reqCount - playerCount;
-            uint32 vaultCount = sAbyssalStorageMgr->GetItemCount(accountId, reqItem);
+            uint32 vaultCount = sAbyssalStorageMgr->GetItemCount(storageId, reqItem);
             if (vaultCount == 0)
                 continue;
 
@@ -256,12 +254,18 @@ public:
                 continue;
             }
 
+            // Withdraw before creating the item: with a shared vault another
+            // character may have taken the items since we checked the count
+            if (!sAbyssalStorageMgr->WithdrawItem(storageId, reqItem, toMaterialize))
+                continue;
+
             Item* newItem = player->StoreNewItem(dest, reqItem, true);
-            if (newItem && data)
+            if (!newItem)
+                sAbyssalStorageMgr->DepositItem(storageId, reqItem, toMaterialize);
+            else if (data)
                 data->materializedItems.insert(newItem->GetGUID().GetCounter());
 
-            sAbyssalStorageMgr->WithdrawItem(accountId, reqItem, toMaterialize);
-            sAbyssalStorageMgr->SendItemUpdate(player, reqItem, sAbyssalStorageMgr->GetItemCount(accountId, reqItem));
+            sAbyssalStorageMgr->BroadcastItemCount(storageId, reqItem);
         }
 
         if (data)
@@ -316,7 +320,7 @@ public:
         if (!hasReagents)
             return;
 
-        uint32 accountId = player->GetSession()->GetAccountId();
+        uint32 storageId = sAbyssalStorageMgr->GetStorageId(player);
         AbyssalPlayerData* data = GetAbyssalData(player);
         if (!data)
             return;
@@ -334,7 +338,7 @@ public:
                 continue;
 
             uint32 deficit = reagentCount - playerHas;
-            uint32 vaultCount = sAbyssalStorageMgr->GetItemCount(accountId, reagentEntry);
+            uint32 vaultCount = sAbyssalStorageMgr->GetItemCount(storageId, reagentEntry);
 
             if (vaultCount < deficit)
                 return; // not enough even with vault
@@ -365,11 +369,18 @@ public:
                 return;
             }
 
+            // Withdraw first; if another character emptied the shared vault meanwhile,
+            // skip it and let the normal reagent check fail the cast
+            if (!sAbyssalStorageMgr->WithdrawItem(storageId, reagentEntry, deficit))
+                continue;
+
             Item* newItem = player->StoreNewItem(dest, reagentEntry, true);
-            if (newItem)
+            if (!newItem)
+                sAbyssalStorageMgr->DepositItem(storageId, reagentEntry, deficit);
+            else
                 data->materializedItems.insert(newItem->GetGUID().GetCounter());
 
-            sAbyssalStorageMgr->WithdrawItem(accountId, reagentEntry, deficit);
+            sAbyssalStorageMgr->BroadcastItemCount(storageId, reagentEntry);
         }
         data->isMaterializing = false;
     }
@@ -403,7 +414,7 @@ public:
             // Last craft done — fall through to re-vault leftovers
         }
 
-        uint32 accountId = player->GetSession()->GetAccountId();
+        uint32 storageId = sAbyssalStorageMgr->GetStorageId(player);
 
         // Re-vault any materialized items that are still in inventory (leftovers)
         data->isMaterializing = true;
@@ -415,8 +426,8 @@ public:
                 uint32 entry = item->GetEntry();
                 uint32 count = item->GetCount();
                 player->DestroyItemCount(entry, count, true);
-                sAbyssalStorageMgr->DepositItem(accountId, entry, count);
-                sAbyssalStorageMgr->SendItemUpdate(player, entry, sAbyssalStorageMgr->GetItemCount(accountId, entry));
+                sAbyssalStorageMgr->DepositItem(storageId, entry, count);
+                sAbyssalStorageMgr->BroadcastItemCount(storageId, entry);
             }
         }
         data->materializedItems.clear();
@@ -446,6 +457,8 @@ public:
             { "deposit",  HandleDepositCommand,   SEC_PLAYER, Console::No },
             { "sync",     HandleSyncCommand,      SEC_PLAYER, Console::No },
             { "craft",    HandleCraftCommand,      SEC_PLAYER, Console::No },
+            { "link",     HandleLinkCommand,       SEC_ADMINISTRATOR, Console::Yes },
+            { "unlink",   HandleUnlinkCommand,     SEC_ADMINISTRATOR, Console::Yes },
         };
         static ChatCommandTable commandTable =
         {
@@ -464,8 +477,8 @@ public:
         if (!player)
             return false;
 
-        uint32 accountId = player->GetSession()->GetAccountId();
-        uint32 vaultCount = sAbyssalStorageMgr->GetItemCount(accountId, itemEntry);
+        uint32 storageId = sAbyssalStorageMgr->GetStorageId(player);
+        uint32 vaultCount = sAbyssalStorageMgr->GetItemCount(storageId, itemEntry);
 
         if (vaultCount == 0)
         {
@@ -504,19 +517,22 @@ public:
                 break;
             }
 
-            player->StoreNewItem(dest, itemEntry, true);
-            sAbyssalStorageMgr->WithdrawItem(accountId, itemEntry, stackSize);
+            // Withdraw before creating: another character sharing the vault may have taken some
+            if (!sAbyssalStorageMgr->WithdrawItem(storageId, itemEntry, stackSize))
+                break;
+
+            if (!player->StoreNewItem(dest, itemEntry, true))
+            {
+                sAbyssalStorageMgr->DepositItem(storageId, itemEntry, stackSize);
+                break;
+            }
             remaining -= stackSize;
         }
 
         uint32 withdrawn = count - remaining;
         if (withdrawn > 0)
         {
-            uint32 newCount = sAbyssalStorageMgr->GetItemCount(accountId, itemEntry);
-            if (newCount > 0)
-                sAbyssalStorageMgr->SendItemUpdate(player, itemEntry, newCount);
-            else
-                sAbyssalStorageMgr->SendItemDelete(player, itemEntry);
+            sAbyssalStorageMgr->BroadcastItemCount(storageId, itemEntry);
 
             handler->PSendSysMessage("Abyssal Storage: Withdrew {} x{}.", BuildItemLink(itemEntry), withdrawn);
         }
@@ -533,7 +549,7 @@ public:
         if (!player)
             return false;
 
-        uint32 accountId = player->GetSession()->GetAccountId();
+        uint32 storageId = sAbyssalStorageMgr->GetStorageId(player);
 
         // Collect totals first — DestroyItemCount searches the whole inventory,
         // so destroying during iteration can skip stacks of the same item
@@ -571,7 +587,8 @@ public:
         for (auto const& [entry, count] : toDeposit)
         {
             player->DestroyItemCount(entry, count, true);
-            sAbyssalStorageMgr->DepositItem(accountId, entry, count);
+            sAbyssalStorageMgr->DepositItem(storageId, entry, count);
+            sAbyssalStorageMgr->BroadcastItemCount(storageId, entry);
             ++depositedCount;
         }
 
@@ -579,7 +596,6 @@ public:
         if (data)
             data->autoStoreEnabled = true;
 
-        sAbyssalStorageMgr->SendFullSync(player);
         handler->PSendSysMessage("Abyssal Storage: Deposited {} item stacks.", depositedCount);
 
         return true;
@@ -596,6 +612,88 @@ public:
 
         sAbyssalStorageMgr->SendFullSync(player);
         handler->SendSysMessage("Abyssal Storage: Sync complete.");
+        return true;
+    }
+
+    static uint32 GetAccountIdByName(std::string name)
+    {
+        if (!Utf8ToUpperOnlyLatin(name))
+            return 0;
+        return AccountMgr::GetId(name);
+    }
+
+    // .abs link <account> <mainAccount>
+    // Makes <account> share the vault of <mainAccount>. If <account> owns a vault
+    // (including one shared by other accounts), its items and members move along.
+    static bool HandleLinkCommand(ChatHandler* handler, std::string accountName, std::string mainAccountName)
+    {
+        uint32 accountId = GetAccountIdByName(accountName);
+        uint32 mainAccountId = GetAccountIdByName(mainAccountName);
+        if (!accountId || !mainAccountId)
+        {
+            handler->SendSysMessage("Abyssal Storage: Account not found.");
+            return true;
+        }
+
+        uint32 currentStorage = sAbyssalStorageMgr->LookupStorageOwner(accountId);
+        uint32 newStorage = sAbyssalStorageMgr->LookupStorageOwner(mainAccountId);
+        if (currentStorage == newStorage)
+        {
+            handler->SendSysMessage("Abyssal Storage: Those accounts already share a vault.");
+            return true;
+        }
+
+        // The in-memory vault of online players would go stale, so require everyone to be offline
+        if (sAbyssalStorageMgr->IsAccountLoaded(currentStorage) || sAbyssalStorageMgr->IsAccountLoaded(newStorage))
+        {
+            handler->SendSysMessage("Abyssal Storage: Log out all characters using either vault first.");
+            return true;
+        }
+
+        CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+        if (currentStorage == accountId)
+        {
+            // The account owns its vault: merge the items and move any accounts linked to it
+            trans->Append("INSERT INTO abyssal_storage (account_id, item_entry, count) "
+                "SELECT {}, src.item_entry, src.count FROM (SELECT item_entry, count FROM abyssal_storage WHERE account_id = {}) AS src "
+                "ON DUPLICATE KEY UPDATE count = abyssal_storage.count + src.count", newStorage, accountId);
+            trans->Append("DELETE FROM abyssal_storage WHERE account_id = {}", accountId);
+            trans->Append("UPDATE abyssal_storage_link SET owner_account_id = {} WHERE owner_account_id = {}", newStorage, accountId);
+        }
+        // Otherwise the account was linked elsewhere; the shared items stay with that vault
+        trans->Append("REPLACE INTO abyssal_storage_link (account_id, owner_account_id) VALUES ({}, {})", accountId, newStorage);
+        CharacterDatabase.DirectCommitTransaction(trans);
+
+        handler->PSendSysMessage("Abyssal Storage: Account {} now shares the vault of account {}.", accountName, mainAccountName);
+        return true;
+    }
+
+    // .abs unlink <account>
+    // Gives <account> its own, empty vault again. The shared items stay in the shared vault.
+    static bool HandleUnlinkCommand(ChatHandler* handler, std::string accountName)
+    {
+        uint32 accountId = GetAccountIdByName(accountName);
+        if (!accountId)
+        {
+            handler->SendSysMessage("Abyssal Storage: Account not found.");
+            return true;
+        }
+
+        uint32 currentStorage = sAbyssalStorageMgr->LookupStorageOwner(accountId);
+        if (currentStorage == accountId)
+        {
+            handler->SendSysMessage("Abyssal Storage: That account is not linked to another vault.");
+            return true;
+        }
+
+        if (sAbyssalStorageMgr->IsAccountLoaded(currentStorage))
+        {
+            handler->SendSysMessage("Abyssal Storage: Log out all characters using that vault first.");
+            return true;
+        }
+
+        CharacterDatabase.DirectExecute("DELETE FROM abyssal_storage_link WHERE account_id = {}", accountId);
+        handler->PSendSysMessage("Abyssal Storage: Account {} has its own vault again.", accountName);
         return true;
     }
 
@@ -634,7 +732,7 @@ public:
             return true;
         }
 
-        uint32 accountId = player->GetSession()->GetAccountId();
+        uint32 storageId = sAbyssalStorageMgr->GetStorageId(player);
         uint32 craftCount = optCount.value_or(1);
         if (craftCount == 0)
             craftCount = 1;
@@ -658,7 +756,7 @@ public:
                 continue;
 
             uint32 playerHas = player->GetItemCount(reagentEntry);
-            uint32 vaultHas = sAbyssalStorageMgr->GetItemCount(accountId, reagentEntry);
+            uint32 vaultHas = sAbyssalStorageMgr->GetItemCount(storageId, reagentEntry);
 
             if (playerHas + vaultHas < reagentCount)
             {
@@ -761,12 +859,22 @@ public:
                 return true;
             }
 
+            // Withdraw before creating: another character sharing the vault may have taken some
+            if (!sAbyssalStorageMgr->WithdrawItem(storageId, r.entry, toWithdraw))
+            {
+                if (data)
+                    data->isMaterializing = false;
+                handler->SendSysMessage("Abyssal Storage: Not enough reagents.");
+                return true;
+            }
+
             Item* newItem = player->StoreNewItem(dest, r.entry, true);
-            if (newItem && data)
+            if (!newItem)
+                sAbyssalStorageMgr->DepositItem(storageId, r.entry, toWithdraw);
+            else if (data)
                 data->materializedItems.insert(newItem->GetGUID().GetCounter());
 
-            sAbyssalStorageMgr->WithdrawItem(accountId, r.entry, toWithdraw);
-            sAbyssalStorageMgr->SendItemUpdate(player, r.entry, sAbyssalStorageMgr->GetItemCount(accountId, r.entry));
+            sAbyssalStorageMgr->BroadcastItemCount(storageId, r.entry);
         }
 
         if (data)

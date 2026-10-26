@@ -7,6 +7,14 @@ The project has no version tags yet, so entries are grouped by date.
 
 ## [Unreleased]
 
+### Added
+- Several accounts can share one vault. GMs link them with `.abs link <account> <mainAccount>` and undo it with `.abs unlink <account>`. Run `data/sql/db-characters/abyssal_storage_link.sql` to create the new table.
+- Vault changes show up right away in the addon for every online character sharing the vault.
+
+### Fixed
+- Logging out one character no longer drops the vault from memory while other characters using it are still online.
+- Random playerbot accounts (`rndbot*`) are ignored, and the check no longer queries the database on every update.
+
 ## 2026-10-25
 
 ### Changed
