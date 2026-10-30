@@ -90,7 +90,8 @@ public:
         PLAYERHOOK_ON_LOGOUT,
         PLAYERHOOK_ON_UPDATE,
         PLAYERHOOK_ON_STORE_NEW_ITEM,
-        PLAYERHOOK_ON_BEFORE_QUEST_COMPLETE
+        PLAYERHOOK_ON_BEFORE_QUEST_COMPLETE,
+        PLAYERHOOK_ON_PLAYER_QUEST_ACCEPT
     }) { }
 
     void OnPlayerLogin(Player* player) override
@@ -217,22 +218,37 @@ public:
 
     bool OnPlayerBeforeQuestComplete(Player* player, uint32 questId) override
     {
+        if (Quest const* quest = sObjectMgr->GetQuestTemplate(questId))
+            MaterializeQuestItems(player, quest, true);
+
+        return true;
+    }
+
+    // Pull required items out of the vault as soon as the quest is taken, so
+    // items stored before the quest existed (e.g. Murloc Fins) count right away
+    void OnPlayerQuestAccept(Player* player, Quest const* quest) override
+    {
+        if (quest)
+            MaterializeQuestItems(player, quest, false);
+    }
+
+private:
+    // trackAsMaterialized: put leftovers back in the vault later (crafting/logout).
+    // Off for quest accept, where the items must stay in bags until turn-in.
+    static void MaterializeQuestItems(Player* player, Quest const* quest, bool trackAsMaterialized)
+    {
         if (!sAbyssalStorageMgr->IsEnabled() || !player)
-            return true;
+            return;
 
         if (IsRandomBot(player))
-            return true;
+            return;
 
         AbyssalPlayerData* data = GetAbyssalData(player);
 
         // Prevent infinite recursion: StoreNewItem -> ItemAddedQuestCheck ->
         // CompleteQuest -> OnPlayerBeforeQuestComplete -> StoreNewItem ...
         if (data && data->isMaterializing)
-            return true;
-
-        Quest const* quest = sObjectMgr->GetQuestTemplate(questId);
-        if (!quest)
-            return true;
+            return;
 
         uint32 storageId = sAbyssalStorageMgr->GetStorageId(player);
 
@@ -273,7 +289,7 @@ public:
             Item* newItem = player->StoreNewItem(dest, reqItem, true);
             if (!newItem)
                 sAbyssalStorageMgr->DepositItem(storageId, reqItem, toMaterialize);
-            else if (data)
+            else if (data && trackAsMaterialized)
                 data->materializedItems.insert(newItem->GetGUID().GetCounter());
 
             sAbyssalStorageMgr->BroadcastItemCount(storageId, reqItem);
@@ -281,8 +297,6 @@ public:
 
         if (data)
             data->isMaterializing = false;
-
-        return true;
     }
 };
 
