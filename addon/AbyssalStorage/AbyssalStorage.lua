@@ -185,9 +185,23 @@ end)
 -- Item Tooltips — show the vault count on every item tooltip
 -- ============================================================================
 
+local VAULT_LINE = "Abyssal Storage"
+
+-- OnTooltipSetItem can fire more than once per tooltip (e.g. recipes), so look
+-- for our line instead of keeping a flag that other addons' tooltip use can leave stale
+local function HasVaultLine(tooltip)
+    local name = tooltip:GetName()
+    for i = 1, tooltip:NumLines() do
+        local left = _G[name .. "TextLeft" .. i]
+        if left and left:GetText() == VAULT_LINE then
+            return true
+        end
+    end
+    return false
+end
+
 local function AddVaultLine(tooltip)
-    -- OnTooltipSetItem can fire more than once per tooltip (e.g. recipes)
-    if tooltip.abyssalLineAdded then return end
+    if HasVaultLine(tooltip) then return end
 
     -- The vault grid adds its own Bags/Storage/Total lines
     local owner = tooltip:GetOwner()
@@ -199,19 +213,13 @@ local function AddVaultLine(tooltip)
 
     local count = AbyssalStorage:GetItemCount(entry)
     if count > 0 then
-        tooltip:AddDoubleLine("Abyssal Storage", tostring(count), 0.78, 0.82, 0.88, 0.2, 1, 0.6)
-        tooltip.abyssalLineAdded = true
+        tooltip:AddDoubleLine(VAULT_LINE, tostring(count), 0.78, 0.82, 0.88, 0.2, 1, 0.6)
         tooltip:Show()
     end
 end
 
-local function ClearVaultLine(tooltip)
-    tooltip.abyssalLineAdded = nil
-end
-
 for _, tooltip in ipairs({ GameTooltip, ItemRefTooltip }) do
     tooltip:HookScript("OnTooltipSetItem", AddVaultLine)
-    tooltip:HookScript("OnTooltipCleared", ClearVaultLine)
 end
 
 -- ============================================================================
