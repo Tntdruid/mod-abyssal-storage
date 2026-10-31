@@ -260,6 +260,7 @@ local function CreateCell(index)
     cell.bg = bg
 
     -- Tooltip
+    cell.isAbyssalCell = true
     cell:SetScript("OnEnter", function(self)
         if self.itemEntry then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")

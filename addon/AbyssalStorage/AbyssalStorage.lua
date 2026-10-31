@@ -182,6 +182,39 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, arg2, ...)
 end)
 
 -- ============================================================================
+-- Item Tooltips — show the vault count on every item tooltip
+-- ============================================================================
+
+local function AddVaultLine(tooltip)
+    -- OnTooltipSetItem can fire more than once per tooltip (e.g. recipes)
+    if tooltip.abyssalLineAdded then return end
+
+    -- The vault grid adds its own Bags/Storage/Total lines
+    local owner = tooltip:GetOwner()
+    if owner and owner.isAbyssalCell then return end
+
+    local _, link = tooltip:GetItem()
+    local entry = AbyssalStorage:EntryFromLink(link)
+    if not entry then return end
+
+    local count = AbyssalStorage:GetItemCount(entry)
+    if count > 0 then
+        tooltip:AddDoubleLine("Abyssal Storage", tostring(count), 0.78, 0.82, 0.88, 0.2, 1, 0.6)
+        tooltip.abyssalLineAdded = true
+        tooltip:Show()
+    end
+end
+
+local function ClearVaultLine(tooltip)
+    tooltip.abyssalLineAdded = nil
+end
+
+for _, tooltip in ipairs({ GameTooltip, ItemRefTooltip }) do
+    tooltip:HookScript("OnTooltipSetItem", AddVaultLine)
+    tooltip:HookScript("OnTooltipCleared", ClearVaultLine)
+end
+
+-- ============================================================================
 -- Slash Commands
 -- ============================================================================
 

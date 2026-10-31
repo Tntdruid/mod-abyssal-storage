@@ -11,6 +11,7 @@ Automatically deposits trade goods into a shared vault accessible by all charact
 - **Quest integration**: Quest-required items are pulled from the vault automatically on turn-in
 - **Multi-craft**: "Create All" uses vault materials across the full batch
 - **Grid UI**: Searchable item grid with tooltips, opened via `/abs` or right-clicking the backpack
+- **Item tooltips**: Every item tooltip (bags, chat links, loot, auction house, professions) shows how many you have in the vault
 - **Real-time sync**: Vault state syncs on login and updates incrementally
 
 ## Commands
