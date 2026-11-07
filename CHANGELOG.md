@@ -8,6 +8,7 @@ The project has no version tags yet, so entries are grouped by date.
 ## [Unreleased]
 
 ### Added
+- `AbyssalStorage.ExtraItems` stores extra items by id, on top of trade goods and gems. It defaults to Lesser Bloodstone Ore (4278), which the game files as a quest item.
 - Several accounts can share one vault. GMs link them with `.abs link <account> <mainAccount>` and undo it with `.abs unlink <account>`. Run `data/sql/db-characters/abyssal_storage_link.sql` to create the new table.
 - Players can share a vault without a GM: `.abs share invite <character>`, then `.abs share accept` on the invited account. `leave`, `kick`, `decline` and `list` are also available. Turn it off with `AbyssalStorage.EnableSharing = 0`. Run `data/sql/db-characters/abyssal_storage_invite.sql` to create the invite table.
 - Vault changes show up right away in the addon for every online character sharing the vault.

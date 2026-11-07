@@ -75,6 +75,7 @@ public:
     {
         sAbyssalStorageMgr->SetEnabled(sConfigMgr->GetOption<bool>("AbyssalStorage.Enable", true));
         sAbyssalStorageMgr->SetSharingEnabled(sConfigMgr->GetOption<bool>("AbyssalStorage.EnableSharing", true));
+        sAbyssalStorageMgr->SetExtraItems(sConfigMgr->GetOption<std::string>("AbyssalStorage.ExtraItems", "4278"));
     }
 };
 

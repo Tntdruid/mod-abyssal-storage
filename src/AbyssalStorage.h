@@ -5,6 +5,7 @@
 #include "Define.h"
 #include "ObjectGuid.h"
 #include <unordered_map>
+#include <unordered_set>
 #include <map>
 #include <set>
 #include <mutex>
@@ -64,6 +65,8 @@ public:
     std::unordered_map<uint32, uint32> GetAllItems(uint32 accountId);
 
     bool ShouldAutoStore(Player* player, ItemTemplate const* itemTemplate);
+    // Item ids stored on top of trade goods and gems (AbyssalStorage.ExtraItems)
+    void SetExtraItems(std::string const& itemList);
     bool IsItemRequiredByActiveQuest(Player* player, uint32 itemId);
     uint32 GetQuestReservedCount(Player* player, uint32 itemId);
 
@@ -91,6 +94,7 @@ private:
     std::unordered_map<uint32, std::map<ObjectGuid, uint32>> _members;
     // accountId -> storageId
     std::unordered_map<uint32, uint32> _accountStorage;
+    std::unordered_set<uint32> _extraItems;
     std::mutex _storageMutex;
     bool _enabled = true;
     bool _sharingEnabled = true;

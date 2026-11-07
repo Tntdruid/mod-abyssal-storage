@@ -56,7 +56,10 @@ In `mod_abyssal_storage.conf`:
 ```
 AbyssalStorage.Enable = 1
 AbyssalStorage.EnableSharing = 1
+AbyssalStorage.ExtraItems = "4278"
 ```
+
+`AbyssalStorage.ExtraItems` lists item ids to store on top of trade goods and gems, for gathered items the game files as quest or misc items (4278 is Lesser Bloodstone Ore).
 
 ## Installation
 

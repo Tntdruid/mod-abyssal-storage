@@ -9,6 +9,8 @@
 #include "ObjectMgr.h"
 #include "QuestDef.h"
 #include "Log.h"
+#include <algorithm>
+#include <sstream>
 
 AbyssalPlayerData* GetAbyssalData(Player* player)
 {
@@ -290,12 +292,34 @@ bool AbyssalStorageMgr::IsItemRequiredByActiveQuest(Player* player, uint32 itemI
     return reserved > 0 && player->GetItemCount(itemId) <= reserved;
 }
 
+void AbyssalStorageMgr::SetExtraItems(std::string const& itemList)
+{
+    _extraItems.clear();
+
+    // Accept "4278, 1234" as well as "4278 1234"
+    std::string list = itemList;
+    std::replace(list.begin(), list.end(), ',', ' ');
+
+    std::istringstream stream(list);
+    std::string token;
+    while (stream >> token)
+    {
+        // Item templates are not loaded yet when the config is first read, so only check the number
+        uint32 itemId = static_cast<uint32>(std::strtoul(token.c_str(), nullptr, 10));
+        if (itemId)
+            _extraItems.insert(itemId);
+        else
+            LOG_ERROR("module", "AbyssalStorage.ExtraItems: '{}' is not a valid item id, ignored.", token);
+    }
+}
+
 bool AbyssalStorageMgr::ShouldAutoStore(Player* player, ItemTemplate const* itemTemplate)
 {
     if (!itemTemplate)
         return false;
 
-    if (itemTemplate->Class != ITEM_CLASS_TRADE_GOODS && itemTemplate->Class != ITEM_CLASS_GEM)
+    if (itemTemplate->Class != ITEM_CLASS_TRADE_GOODS && itemTemplate->Class != ITEM_CLASS_GEM
+        && _extraItems.find(itemTemplate->ItemId) == _extraItems.end())
         return false;
 
     // Profession tools (runed enchanting rods, etc.) must stay in bags to satisfy spell totem requirements

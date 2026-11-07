@@ -23,3 +23,15 @@ AbyssalStorage.Enable = 1
 #
 
 AbyssalStorage.EnableSharing = 1
+
+#
+#    AbyssalStorage.ExtraItems
+#        Description: Item ids to store on top of trade goods and gems, separated by
+#                     commas or spaces. Use this for gathered items the game files as
+#                     quest or misc items. While an active quest needs one of these
+#                     items, the quest's amount stays in your bags.
+#        Example:     "4278, 12345"
+#        Default:     "4278" (Lesser Bloodstone Ore)
+#
+
+AbyssalStorage.ExtraItems = "4278"
