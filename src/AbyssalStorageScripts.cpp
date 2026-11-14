@@ -6,6 +6,7 @@
 #include "Config.h"
 #include "DatabaseEnv.h"
 #include "Item.h"
+#include "Log.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "Player.h"
@@ -19,8 +20,9 @@
 #include "WorldSession.h"
 #include <sstream>
 
-// Returns true if the player belongs to a random playerbot account (username prefix "rndbot").
-// The account name lookup hits the login DB, so the result is cached in the player's DataMap.
+// Returns true if the player belongs to a random playerbot account (username starts with the
+// bot account prefix, "rndbot" by default). The account name lookup hits the login DB, so the
+// result is cached in the player's DataMap.
 static bool IsRandomBot(Player* player)
 {
     if (!player)
@@ -37,14 +39,32 @@ static bool IsRandomBot(Player* player)
     std::string username;
     if (!sAccountMgr->GetName(accountId, username))
         return false;
-    // Case-insensitive prefix check
-    if (username.size() < 6)
+    // Case-insensitive prefix check; the configured prefix is already lowercase
+    std::string const& botPrefix = sAbyssalStorageMgr->GetRandomBotPrefix();
+    if (botPrefix.empty() || username.size() < botPrefix.size())
         return false;
-    std::string prefix = username.substr(0, 6);
+    std::string prefix = username.substr(0, botPrefix.size());
     for (char& c : prefix)
         c = std::tolower(static_cast<unsigned char>(c));
-    data->isRandomBot = prefix == "rndbot";
+    data->isRandomBot = prefix == botPrefix;
     return data->isRandomBot;
+}
+
+// AbyssalStorage.RandomBotAccountPrefix wins; when it is empty, follow mod-playerbots' own
+// setting (current and older option names), so realms with a custom prefix work unchanged
+static std::string LoadRandomBotPrefix()
+{
+    std::string prefix = sConfigMgr->GetOption<std::string>("AbyssalStorage.RandomBotAccountPrefix", "", false);
+    if (prefix.empty())
+        prefix = sConfigMgr->GetOption<std::string>("Playerbots.RandomBotAccountPrefix", "", false);
+    if (prefix.empty())
+        prefix = sConfigMgr->GetOption<std::string>("AiPlayerbot.RandomBotAccountPrefix", "", false);
+    if (prefix.empty())
+        prefix = "rndbot";
+
+    for (char& c : prefix)
+        c = std::tolower(static_cast<unsigned char>(c));
+    return prefix;
 }
 
 // Build a clickable item link like "|cff1eff00|Hitem:2589:0:0:0:0:0:0:0:0:0|h[Linen Cloth]|h|r"
@@ -76,6 +96,8 @@ public:
         sAbyssalStorageMgr->SetEnabled(sConfigMgr->GetOption<bool>("AbyssalStorage.Enable", true));
         sAbyssalStorageMgr->SetSharingEnabled(sConfigMgr->GetOption<bool>("AbyssalStorage.EnableSharing", true));
         sAbyssalStorageMgr->SetExtraItems(sConfigMgr->GetOption<std::string>("AbyssalStorage.ExtraItems", "4278"));
+        sAbyssalStorageMgr->SetRandomBotPrefix(LoadRandomBotPrefix());
+        LOG_INFO("module", "AbyssalStorage: ignoring bot accounts starting with '{}'.", sAbyssalStorageMgr->GetRandomBotPrefix());
     }
 };
 

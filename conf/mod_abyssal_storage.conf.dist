@@ -35,3 +35,15 @@ AbyssalStorage.EnableSharing = 1
 #
 
 AbyssalStorage.ExtraItems = "4278"
+
+#
+#    AbyssalStorage.RandomBotAccountPrefix
+#        Description: Accounts whose username starts with this prefix (any case) are random
+#                     playerbots and are ignored by the vault. Leave empty to use
+#                     mod-playerbots' own Playerbots.RandomBotAccountPrefix, or "rndbot"
+#                     when that is not set.
+#        Example:     "botr2"
+#        Default:     "" (follow mod-playerbots)
+#
+
+AbyssalStorage.RandomBotAccountPrefix = ""

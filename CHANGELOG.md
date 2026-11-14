@@ -18,6 +18,7 @@ The project has no version tags yet, so entries are grouped by date.
 ### Fixed
 - Logging out one character no longer drops the vault from memory while other characters using it are still online.
 - Random playerbot accounts (`rndbot*`) are ignored, and the check no longer queries the database on every update.
+- Random playerbot accounts with a custom prefix (such as `botr2`) are ignored too. The prefix follows mod-playerbots' `Playerbots.RandomBotAccountPrefix` or can be set with `AbyssalStorage.RandomBotAccountPrefix`.
 
 ## 2026-10-25
 

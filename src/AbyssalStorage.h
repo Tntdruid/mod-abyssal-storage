@@ -82,6 +82,9 @@ public:
     void SetEnabled(bool enabled) { _enabled = enabled; }
     bool IsSharingEnabled() const { return _sharingEnabled; }
     void SetSharingEnabled(bool enabled) { _sharingEnabled = enabled; }
+    // Lowercase username prefix of random playerbot accounts, which the module ignores
+    std::string const& GetRandomBotPrefix() const { return _randomBotPrefix; }
+    void SetRandomBotPrefix(std::string const& prefix) { _randomBotPrefix = prefix; }
 
 private:
     AbyssalStorageMgr() = default;
@@ -98,6 +101,7 @@ private:
     std::mutex _storageMutex;
     bool _enabled = true;
     bool _sharingEnabled = true;
+    std::string _randomBotPrefix = "rndbot";
 };
 
 #define sAbyssalStorageMgr AbyssalStorageMgr::instance()

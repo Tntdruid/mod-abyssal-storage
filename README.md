@@ -57,7 +57,10 @@ In `mod_abyssal_storage.conf`:
 AbyssalStorage.Enable = 1
 AbyssalStorage.EnableSharing = 1
 AbyssalStorage.ExtraItems = "4278"
+AbyssalStorage.RandomBotAccountPrefix = ""
 ```
+
+`AbyssalStorage.RandomBotAccountPrefix` is the username prefix of random playerbot accounts, which the vault ignores. Left empty, it follows mod-playerbots' `Playerbots.RandomBotAccountPrefix` (or `rndbot`).
 
 `AbyssalStorage.ExtraItems` lists item ids to store on top of trade goods and gems, for gathered items the game files as quest or misc items (4278 is Lesser Bloodstone Ore).
 
