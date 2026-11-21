@@ -75,6 +75,6 @@ Releases from 1.0.0 on follow [Semantic Versioning](https://semver.org/spec/v2.0
 - Item materialization logic.
 - The "Missing Reagent" error message is no longer shown in the UI.
 
-[Unreleased]: https://github.com/Tntdruid/mod-abyssal-storage/compare/v2.0.0...HEAD
-[2.0.0]: https://github.com/Tntdruid/mod-abyssal-storage/compare/v1.0.0...v2.0.0
-[1.0.0]: https://github.com/Tntdruid/mod-abyssal-storage/releases/tag/v1.0.0
+[Unreleased]: https://github.com/Tntdruid/mod-pocket-storage/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/Tntdruid/mod-pocket-storage/compare/v1.0.0...v2.0.0
+[1.0.0]: https://github.com/Tntdruid/mod-pocket-storage/releases/tag/v1.0.0
