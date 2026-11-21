@@ -31,12 +31,15 @@ Each account has its own lists, edited in the addon's rules window by dropping a
 - **Store**: always vaulted, even items that are not trade goods (food, potions, scrolls). Only stackable items, since the vault does not keep enchants or durability.
 - **Keep**: never vaulted, not even trade goods.
 - **Auto-store on loot**: turn automatic vaulting off for the account. Deposit All still works.
+- **Ranks**: adding an item whose name ends in a rank numeral, such as Scroll of Spirit IV, asks whether to add every rank (Scroll of Spirit, Scroll of Spirit II, ...) or only that one.
+
+Add `all` to a rule command to include every rank of the item.
 
 | Command | Description |
 |---|---|
-| `.ps rule store <itemId>` | Add an item to the Store list |
-| `.ps rule keep <itemId>` | Add an item to the Keep list |
-| `.ps rule remove <itemId>` | Remove an item from both lists |
+| `.ps rule store <itemId> [all]` | Add an item to the Store list |
+| `.ps rule keep <itemId> [all]` | Add an item to the Keep list |
+| `.ps rule remove <itemId> [all]` | Remove an item from both lists |
 | `.ps autostore on\|off` | Turn auto-store on loot on or off for the account |
 
 ### Sharing a vault between accounts

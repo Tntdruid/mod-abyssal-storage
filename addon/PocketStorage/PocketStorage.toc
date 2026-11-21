@@ -1,7 +1,8 @@
 ## Interface: 30300
 ## Title: Pocket Storage
 ## Notes: Account-wide pocket vault for trade goods
-## Version: 2.0.0
+## Version: 2.1.0
+## Author: Tntdruid
 ## SavedVariables: PocketStorageDB
 PocketStorage.lua
 PocketStorageUI.lua

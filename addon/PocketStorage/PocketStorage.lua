@@ -83,13 +83,49 @@ function PocketStorage:ToItemEntry(input)
     return tonumber(input) or self:EntryFromLink(tostring(input))
 end
 
+local function SendAddRule(entry, listKey, allRanks)
+    PocketStorage:SendCommand("ps rule " .. (listKey == "keep" and "keep " or "store ") .. entry .. (allRanks and " all" or ""))
+end
+
+StaticPopupDialogs["POCKET_RULE_ALL_RANKS"] = {
+    text = "Add every rank of %s to your %s list, or only the one you picked?",
+    button1 = "All ranks",
+    button2 = "Only this",
+    OnAccept = function(self, data)
+        SendAddRule(data.entry, data.listKey, true)
+    end,
+    -- Escape also cancels; only the button adds the single item
+    OnCancel = function(self, data, reason)
+        if reason == "clicked" then
+            SendAddRule(data.entry, data.listKey, false)
+        end
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
 function PocketStorage:AddRule(input, listKey)
     local entry = self:ToItemEntry(input)
     if not entry then
         DEFAULT_CHAT_FRAME:AddMessage("|cffff4444Pocket Storage: Drop an item, shift-click a link or type an item ID.|r")
         return
     end
-    self:SendCommand("ps rule " .. (listKey == "keep" and "keep " or "store ") .. entry)
+
+    -- Ranked items such as "Scroll of Spirit IV": offer to add the whole series
+    local name = GetItemInfo(entry)
+    local baseName = name and name:match("^(.+) [IVXL]+$")
+    if baseName then
+        local listName = listKey == "keep" and "|cff00ff00Keep|r" or "|cffffd700Store|r"
+        local dialog = StaticPopup_Show("POCKET_RULE_ALL_RANKS", "|cffffffff" .. baseName .. "|r", listName)
+        if dialog then
+            dialog.data = { entry = entry, listKey = listKey }
+            return
+        end
+    end
+
+    SendAddRule(entry, listKey, false)
 end
 
 function PocketStorage:RemoveRule(entry)

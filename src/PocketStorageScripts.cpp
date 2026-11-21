@@ -683,8 +683,42 @@ public:
         return true;
     }
 
-    // .ps rule store|keep|remove <itemId> — the addon's Store/Keep lists, saved per account
-    static bool SetItemRule(ChatHandler* handler, uint32 itemEntry, PocketItemRule rule)
+    // Item name without a trailing rank numeral: "Scroll of Spirit IV" -> "Scroll of Spirit"
+    static std::string StripRank(std::string const& name)
+    {
+        std::size_t space = name.rfind(' ');
+        if (space == std::string::npos || space + 1 == name.size() || name.size() - space - 1 > 5)
+            return name;
+
+        for (std::size_t i = space + 1; i < name.size(); ++i)
+            if (name[i] != 'I' && name[i] != 'V' && name[i] != 'X' && name[i] != 'L')
+                return name;
+
+        return name.substr(0, space);
+    }
+
+    // Every rank of an item: same class and subclass, and a name that is the base name
+    // with or without a rank numeral. An item without a numeral has only itself.
+    static std::vector<ItemTemplate const*> FindItemRanks(ItemTemplate const* item)
+    {
+        std::string baseName = StripRank(item->Name1);
+        if (baseName == item->Name1)
+            return { item };
+
+        std::vector<ItemTemplate const*> ranks;
+        for (auto const& [entry, proto] : *sObjectMgr->GetItemTemplateStore())
+        {
+            if (proto.Class != item->Class || proto.SubClass != item->SubClass)
+                continue;
+            if (proto.Name1 == baseName || StripRank(proto.Name1) == baseName)
+                ranks.push_back(&proto);
+        }
+        return ranks;
+    }
+
+    // .ps rule store|keep|remove <itemId> [all] — the addon's Store/Keep lists, saved per account.
+    // With "all", every rank of the item (Scroll of Spirit, Scroll of Spirit II, ...) gets the rule.
+    static bool SetItemRule(ChatHandler* handler, uint32 itemEntry, PocketItemRule rule, Optional<std::string> const& scope)
     {
         if (!sPocketStorageMgr->IsEnabled())
             return false;
@@ -700,45 +734,77 @@ public:
             return true;
         }
 
-        if (rule == PocketItemRule::Store && itemTemplate->GetMaxStackSize() <= 1)
+        bool allRanks = false;
+        if (scope)
+        {
+            std::string word = *scope;
+            for (char& c : word)
+                c = std::tolower(static_cast<unsigned char>(c));
+            if (word != "all")
+            {
+                handler->SendSysMessage("Pocket Storage: Add \"all\" after the item id to include every rank, or nothing for just this item.");
+                return true;
+            }
+            allRanks = true;
+        }
+
+        std::vector<ItemTemplate const*> items = allRanks ? FindItemRanks(itemTemplate) : std::vector<ItemTemplate const*>{ itemTemplate };
+
+        // The vault keeps only entry and count, so unstackable items cannot be stored
+        std::vector<uint32> entries;
+        for (ItemTemplate const* item : items)
+            if (rule != PocketItemRule::Store || item->GetMaxStackSize() > 1)
+                entries.push_back(item->ItemId);
+
+        if (entries.empty())
         {
             handler->PSendSysMessage("Pocket Storage: {} does not stack, so it cannot be stored.", BuildItemLink(itemEntry));
             return true;
         }
 
         uint32 accountId = player->GetSession()->GetAccountId();
-        if (rule != PocketItemRule::None
-            && sPocketStorageMgr->GetItemRule(accountId, itemEntry) == PocketItemRule::None
-            && sPocketStorageMgr->GetItemRuleCount(accountId) >= POCKET_MAX_ITEM_RULES)
+        if (rule != PocketItemRule::None)
         {
-            handler->PSendSysMessage("Pocket Storage: Your Store and Keep lists are full ({} items).", POCKET_MAX_ITEM_RULES);
-            return true;
+            std::size_t added = 0;
+            for (uint32 entry : entries)
+                if (sPocketStorageMgr->GetItemRule(accountId, entry) == PocketItemRule::None)
+                    ++added;
+
+            if (sPocketStorageMgr->GetItemRuleCount(accountId) + added > POCKET_MAX_ITEM_RULES)
+            {
+                handler->PSendSysMessage("Pocket Storage: Your Store and Keep lists are full ({} items).", POCKET_MAX_ITEM_RULES);
+                return true;
+            }
         }
 
-        sPocketStorageMgr->SetItemRule(accountId, itemEntry, rule);
+        for (uint32 entry : entries)
+            sPocketStorageMgr->SetItemRule(accountId, entry, rule);
+
+        std::string what = entries.size() == 1 ? BuildItemLink(entries.front())
+            : std::to_string(entries.size()) + " ranks of " + StripRank(itemTemplate->Name1);
 
         if (rule == PocketItemRule::Store)
-            handler->PSendSysMessage("Pocket Storage: {} is now always stored.", BuildItemLink(itemEntry));
+            handler->PSendSysMessage("Pocket Storage: {} {} now always stored.", what, entries.size() == 1 ? "is" : "are");
         else if (rule == PocketItemRule::Keep)
-            handler->PSendSysMessage("Pocket Storage: {} is now kept in your bags.", BuildItemLink(itemEntry));
+            handler->PSendSysMessage("Pocket Storage: {} {} now kept in your bags.", what, entries.size() == 1 ? "is" : "are");
         else
-            handler->PSendSysMessage("Pocket Storage: Removed {} from your lists.", BuildItemLink(itemEntry));
+            handler->PSendSysMessage("Pocket Storage: Removed {} from your lists.", what);
         return true;
     }
 
-    static bool HandleRuleStoreCommand(ChatHandler* handler, uint32 itemEntry)
+    static bool HandleRuleStoreCommand(ChatHandler* handler, uint32 itemEntry, Optional<std::string> scope)
     {
-        return SetItemRule(handler, itemEntry, PocketItemRule::Store);
+        return SetItemRule(handler, itemEntry, PocketItemRule::Store, scope);
     }
 
-    static bool HandleRuleKeepCommand(ChatHandler* handler, uint32 itemEntry)
+    static bool HandleRuleKeepCommand(ChatHandler* handler, uint32 itemEntry, Optional<std::string> scope)
     {
-        return SetItemRule(handler, itemEntry, PocketItemRule::Keep);
+        return SetItemRule(handler, itemEntry, PocketItemRule::Keep, scope);
     }
 
-    static bool HandleRuleRemoveCommand(ChatHandler* handler, uint32 itemEntry)
+    static bool HandleRuleRemoveCommand(ChatHandler* handler, uint32 itemEntry, Optional<std::string> scope)
     {
-        return SetItemRule(handler, itemEntry, PocketItemRule::None);
+        return SetItemRule(handler, itemEntry, PocketItemRule::None, scope);
     }
 
     // .ps autostore on|off
