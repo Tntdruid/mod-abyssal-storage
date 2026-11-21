@@ -92,3 +92,10 @@ This module used to be called Abyssal Storage (`mod-abyssal-storage`). Move it t
 3. Copy `conf/mod_pocket_storage.conf.dist` to your server's config directory
 4. Run the files in `data/sql/db-characters/` (`pocket_storage.sql`, `pocket_storage_link.sql`, `pocket_storage_invite.sql`, `pocket_storage_rule.sql`) against your characters database
 5. Copy the `addon/PocketStorage` folder into your WoW `Interface/AddOns` directory
+
+## Credits
+
+- Based on [mod-abyssal-storage](https://github.com/thanhtong89/mod-abyssal-storage) by thanhtong89.
+- Maintained by [Tntdruid](https://github.com/Tntdruid).
+- Random playerbot exclusion by [latchee](https://github.com/latchee).
+- Developed together with Claude (Anthropic), credited as co-author on its commits.
