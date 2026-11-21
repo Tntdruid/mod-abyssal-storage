@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS `abyssal_storage` (
+CREATE TABLE IF NOT EXISTS `pocket_storage` (
   `account_id` INT UNSIGNED NOT NULL,
   `item_entry` INT UNSIGNED NOT NULL,
   `count` INT UNSIGNED NOT NULL DEFAULT 0,

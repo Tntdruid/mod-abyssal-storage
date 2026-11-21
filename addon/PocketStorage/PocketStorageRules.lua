@@ -1,4 +1,4 @@
--- Abyssal Storage - Store/Keep rules window (per account, saved on the server)
+-- Pocket Storage - Store/Keep rules window (per account, saved on the server)
 
 local ROW_HEIGHT = 22
 local VISIBLE_ROWS = 12
@@ -7,7 +7,7 @@ local WIDTH = 380
 local GOLD = { 1, 0.85, 0 }
 
 -- Hidden tooltip used to ask the server for item data that isn't cached yet
-local scanTip = CreateFrame("GameTooltip", "AbyssalStorageRulesScanTip", UIParent, "GameTooltipTemplate")
+local scanTip = CreateFrame("GameTooltip", "PocketStorageRulesScanTip", UIParent, "GameTooltipTemplate")
 scanTip:SetOwner(UIParent, "ANCHOR_NONE")
 
 local function Solid(parent, layer, r, g, b, a)
@@ -36,13 +36,13 @@ end
 local function CursorItemEntry()
     local kind, id, link = GetCursorInfo()
     if kind ~= "item" then return nil end
-    return tonumber(id) or AbyssalStorage:EntryFromLink(link)
+    return tonumber(id) or PocketStorage:EntryFromLink(link)
 end
 
 local function AddFromCursor()
     local entry = CursorItemEntry()
     if entry then
-        AbyssalStorage:AddRule(entry, AbyssalStorage.activeRuleTab)
+        PocketStorage:AddRule(entry, PocketStorage.activeRuleTab)
         ClearCursor()
     end
 end
@@ -52,9 +52,9 @@ end
 -- ============================================================================
 
 local function CreateRulesFrame()
-    if AbyssalStorageRulesFrame then return AbyssalStorageRulesFrame end
+    if PocketStorageRulesFrame then return PocketStorageRulesFrame end
 
-    local frame = CreateFrame("Frame", "AbyssalStorageRulesFrame", UIParent)
+    local frame = CreateFrame("Frame", "PocketStorageRulesFrame", UIParent)
     frame:SetSize(WIDTH, 470)
     frame:SetPoint("CENTER")
     frame:SetFrameStrata("DIALOG")
@@ -65,7 +65,7 @@ local function CreateRulesFrame()
     frame:SetScript("OnDragStart", frame.StartMoving)
     frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
     frame:Hide()
-    tinsert(UISpecialFrames, "AbyssalStorageRulesFrame") -- close with Escape
+    tinsert(UISpecialFrames, "PocketStorageRulesFrame") -- close with Escape
 
     Solid(frame, "BACKGROUND", 0.07, 0.07, 0.07, 0.95):SetAllPoints()
 
@@ -113,8 +113,8 @@ local function CreateRulesFrame()
         end
 
         btn:SetScript("OnClick", function()
-            AbyssalStorage.activeRuleTab = listKey
-            AbyssalStorage:UpdateRulesUI()
+            PocketStorage.activeRuleTab = listKey
+            PocketStorage:UpdateRulesUI()
         end)
         btn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -137,11 +137,11 @@ local function CreateRulesFrame()
     listBg:SetPoint("TOPLEFT", 16, -72)
     listBg:SetSize(WIDTH - 32, ROW_HEIGHT * VISIBLE_ROWS)
 
-    local scroll = CreateFrame("ScrollFrame", "AbyssalStorageRulesScroll", frame, "FauxScrollFrameTemplate")
+    local scroll = CreateFrame("ScrollFrame", "PocketStorageRulesScroll", frame, "FauxScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", listBg)
     scroll:SetPoint("BOTTOMRIGHT", listBg, -24, 0)
     scroll:SetScript("OnVerticalScroll", function(self, offset)
-        FauxScrollFrame_OnVerticalScroll(self, offset, ROW_HEIGHT, function() AbyssalStorage:UpdateRulesUI() end)
+        FauxScrollFrame_OnVerticalScroll(self, offset, ROW_HEIGHT, function() PocketStorage:UpdateRulesUI() end)
     end)
 
     local empty = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -176,7 +176,7 @@ local function CreateRulesFrame()
         row:SetScript("OnClick", function(self, button)
             if not self.itemEntry then return end
             if button == "RightButton" then
-                AbyssalStorage:RemoveRule(self.itemEntry)
+                PocketStorage:RemoveRule(self.itemEntry)
             elseif IsModifiedClick("CHATLINK") then
                 local _, link = GetItemInfo(self.itemEntry)
                 if link then ChatEdit_InsertLink(link) end
@@ -228,7 +228,7 @@ local function CreateRulesFrame()
     -- Add by Link or ID
     -- ========================================================================
 
-    local input = CreateFrame("EditBox", "AbyssalStorageRulesInput", frame, "InputBoxTemplate")
+    local input = CreateFrame("EditBox", "PocketStorageRulesInput", frame, "InputBoxTemplate")
     input:SetSize(WIDTH - 130, 22)
     input:SetPoint("TOPLEFT", drop, "BOTTOMLEFT", 6, -10)
     input:SetAutoFocus(false)
@@ -255,7 +255,7 @@ local function CreateRulesFrame()
     local function AddFromInput()
         local text = input:GetText()
         if text ~= "" then
-            AbyssalStorage:AddRule(text, AbyssalStorage.activeRuleTab)
+            PocketStorage:AddRule(text, PocketStorage.activeRuleTab)
             input:SetText("")
         end
         input:ClearFocus()
@@ -274,12 +274,12 @@ local function CreateRulesFrame()
     -- Footer: auto-store switch
     -- ========================================================================
 
-    local autoStore = CreateFrame("CheckButton", "AbyssalStorageRulesAutoStore", frame, "UICheckButtonTemplate")
+    local autoStore = CreateFrame("CheckButton", "PocketStorageRulesAutoStore", frame, "UICheckButtonTemplate")
     autoStore:SetSize(24, 24)
     autoStore:SetPoint("BOTTOMLEFT", 12, 12)
     _G[autoStore:GetName() .. "Text"]:SetText("Auto-store on loot")
     autoStore:SetScript("OnClick", function(self)
-        AbyssalStorage:SetAutoStore(self:GetChecked() and true or false)
+        PocketStorage:SetAutoStore(self:GetChecked() and true or false)
     end)
     autoStore:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -304,11 +304,11 @@ local function CreateRulesFrame()
         if self.t > 1 then
             self.t = 0
             self:Hide()
-            AbyssalStorage:UpdateRulesUI()
+            PocketStorage:UpdateRulesUI()
         end
     end)
 
-    function AbyssalStorage:UpdateRulesUI()
+    function PocketStorage:UpdateRulesUI()
         if not frame:IsShown() then return end
 
         local isStore = self.activeRuleTab ~= "keep"
@@ -373,12 +373,12 @@ local function CreateRulesFrame()
         autoStore:SetChecked(self.autoStore)
     end
 
-    frame:SetScript("OnShow", function() AbyssalStorage:UpdateRulesUI() end)
+    frame:SetScript("OnShow", function() PocketStorage:UpdateRulesUI() end)
 
     return frame
 end
 
-function AbyssalStorage:ToggleRulesUI()
+function PocketStorage:ToggleRulesUI()
     local frame = CreateRulesFrame()
     if frame:IsShown() then
         frame:Hide()

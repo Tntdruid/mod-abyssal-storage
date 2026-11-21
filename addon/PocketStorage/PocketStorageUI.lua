@@ -1,4 +1,4 @@
--- Abyssal Storage - UI Implementation
+-- Pocket Storage - UI Implementation
 
 local ITEMS_PER_ROW = 12
 local VISIBLE_ROWS = 8
@@ -49,7 +49,7 @@ end
 
 local function BuildDisplayList()
     wipe(displayList)
-    for entry, count in pairs(AbyssalStorage.items) do
+    for entry, count in pairs(PocketStorage.items) do
         local name, _, _, _, _, _, _, _, _, icon = GetItemInfo(entry)
         local category = GetItemCategory(entry)
         local categoryMatches = selectedCategory == "All" or category == selectedCategory
@@ -71,7 +71,7 @@ end
 -- Main Frame
 -- ============================================================================
 
-local frame = CreateFrame("Frame", "AbyssalStorageFrame", UIParent)
+local frame = CreateFrame("Frame", "PocketStorageFrame", UIParent)
 frame:SetSize(FRAME_WIDTH, FRAME_HEIGHT)
 frame:SetPoint("CENTER")
 frame:SetMovable(true)
@@ -95,12 +95,12 @@ header:SetHeight(HEADER_HEIGHT)
 header:SetTexture("Interface\\PaperDollInfoFrame\\UI-GearManager-Title-Background")
 
 -- ESC to close
-tinsert(UISpecialFrames, "AbyssalStorageFrame")
+tinsert(UISpecialFrames, "PocketStorageFrame")
 
 -- Title
 local title = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
 title:SetPoint("TOP", frame, "TOP", 0, -6)
-title:SetText("Abyssal Storage")
+title:SetText("Pocket Storage")
 title:SetTextColor(1, 0.85, 0)
 
 -- Close button
@@ -120,7 +120,7 @@ depositBtn:GetPushedTexture():SetVertexColor(0.18, 0.18, 0.18, 1)
 depositBtn:GetHighlightTexture():SetVertexColor(0.25, 0.25, 0.25, 0.9)
 depositBtn:GetFontString():SetTextColor(1, 0.85, 0)
 depositBtn:SetScript("OnClick", function()
-    AbyssalStorage:Deposit()
+    PocketStorage:Deposit()
 end)
 
 -- Rules button — opens the Store/Keep lists
@@ -136,20 +136,20 @@ rulesBtn:GetPushedTexture():SetVertexColor(0.18, 0.18, 0.18, 1)
 rulesBtn:GetHighlightTexture():SetVertexColor(0.25, 0.25, 0.25, 0.9)
 rulesBtn:GetFontString():SetTextColor(1, 0.85, 0)
 rulesBtn:SetScript("OnClick", function()
-    AbyssalStorage:ToggleRulesUI()
+    PocketStorage:ToggleRulesUI()
 end)
 
 -- ============================================================================
 -- Search Bar
 -- ============================================================================
 
-local searchBox = CreateFrame("EditBox", "AbyssalStorageSearchBox", frame, "InputBoxTemplate")
+local searchBox = CreateFrame("EditBox", "PocketStorageSearchBox", frame, "InputBoxTemplate")
 searchBox:SetSize(FRAME_WIDTH - FRAME_PADDING * 2 - 52, SEARCH_HEIGHT)
 searchBox:SetPoint("TOPLEFT", frame, "TOPLEFT", FRAME_PADDING + 52, -(HEADER_HEIGHT + 12))
 searchBox:SetAutoFocus(false)
 searchBox:SetScript("OnTextChanged", function(self)
     searchFilter = self:GetText() or ""
-    AbyssalStorage:UpdateUI()
+    PocketStorage:UpdateUI()
 end)
 searchBox:SetScript("OnEscapePressed", function(self)
     self:ClearFocus()
@@ -180,7 +180,7 @@ for index, categoryName in ipairs(CATEGORY_ORDER) do
     categoryButton:GetHighlightTexture():SetVertexColor(0.25, 0.25, 0.25, 0.9)
     categoryButton:SetScript("OnClick", function()
         selectedCategory = categoryName
-        AbyssalStorage:UpdateUI()
+        PocketStorage:UpdateUI()
     end)
     categoryButtons[categoryName] = categoryButton
 end
@@ -195,7 +195,7 @@ gridArea:SetPoint("TOPLEFT", frame, "TOPLEFT", FRAME_PADDING, -gridTop)
 gridArea:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -(FRAME_PADDING + SCROLL_WIDTH), FRAME_PADDING)
 
 -- Scroll bar (plain Slider, no template)
-local scrollBar = CreateFrame("Slider", "AbyssalStorageScrollBar", frame)
+local scrollBar = CreateFrame("Slider", "PocketStorageScrollBar", frame)
 scrollBar:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -(FRAME_PADDING + 2) + SCROLL_OUTSET, -(gridTop + 16))
 scrollBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -(FRAME_PADDING + 2) + SCROLL_OUTSET, FRAME_PADDING + 16)
 scrollBar:SetWidth(SCROLL_WIDTH)
@@ -216,7 +216,7 @@ scrollThumb:SetSize(SCROLL_WIDTH + 4, 24)
 scrollBar:SetThumbTexture(scrollThumb)
 
 scrollBar:SetScript("OnValueChanged", function(self, value)
-    AbyssalStorage:UpdateGrid()
+    PocketStorage:UpdateGrid()
 end)
 
 local function ScrollBy(delta)
@@ -246,7 +246,7 @@ local function CreateCell(index)
     local row = math.floor((index - 1) / ITEMS_PER_ROW)
     local col = (index - 1) % ITEMS_PER_ROW
 
-    local cell = CreateFrame("Button", "AbyssalStorageCell" .. index, gridArea)
+    local cell = CreateFrame("Button", "PocketStorageCell" .. index, gridArea)
     cell:SetSize(CELL_SIZE, CELL_SIZE)
     cell:SetPoint("TOPLEFT", gridArea, "TOPLEFT", col * (CELL_SIZE + CELL_SPACING), -row * (CELL_SIZE + CELL_SPACING))
 
@@ -276,7 +276,7 @@ local function CreateCell(index)
     cell.bg = bg
 
     -- Tooltip
-    cell.isAbyssalCell = true
+    cell.isPocketCell = true
     cell:SetScript("OnEnter", function(self)
         if self.itemEntry then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -284,7 +284,7 @@ local function CreateCell(index)
             local bags = GetItemCount and (GetItemCount(self.itemEntry, false) or 0) or 0
             local stored = self.itemCount or 0
             GameTooltip:AddDoubleLine("Bags", tostring(bags), 0.78, 0.82, 0.88, 1, 1, 1)
-            GameTooltip:AddDoubleLine("Abyssal Storage", tostring(stored), 0.78, 0.82, 0.88, 0.2, 1, 0.6)
+            GameTooltip:AddDoubleLine("Pocket Storage", tostring(stored), 0.78, 0.82, 0.88, 0.2, 1, 0.6)
             GameTooltip:AddDoubleLine("Total", tostring(bags + stored), 1, 0.85, 0, 1, 0.85, 0)
             GameTooltip:Show()
         end
@@ -299,7 +299,7 @@ local function CreateCell(index)
             if IsShiftKeyDown() and self.itemCount > 1 then
                 OpenStackSplitFrame(self.itemCount, self, "BOTTOMLEFT", "TOPLEFT")
             else
-                AbyssalStorage:ShowWithdrawDialog(self.itemEntry, self.itemCount)
+                PocketStorage:ShowWithdrawDialog(self.itemEntry, self.itemCount)
             end
         end
     end)
@@ -307,7 +307,7 @@ local function CreateCell(index)
     -- Callback invoked by StackSplitFrame when user confirms a split amount
     cell.SplitStack = function(self, amount)
         if self.itemEntry and amount and amount > 0 then
-            AbyssalStorage:ShowWithdrawDialog(self.itemEntry, amount)
+            PocketStorage:ShowWithdrawDialog(self.itemEntry, amount)
         end
     end
 
@@ -326,12 +326,12 @@ end
 -- Withdraw Dialog
 -- ============================================================================
 
-StaticPopupDialogs["ABYSSAL_WITHDRAW"] = {
-    text = "Withdraw %s x%d from Abyssal Storage?",
+StaticPopupDialogs["POCKET_WITHDRAW"] = {
+    text = "Withdraw %s x%d from Pocket Storage?",
     button1 = "Withdraw",
     button2 = "Cancel",
     OnAccept = function(self, data)
-        AbyssalStorage:Withdraw(data.entry, data.count)
+        PocketStorage:Withdraw(data.entry, data.count)
     end,
     timeout = 0,
     whileDead = true,
@@ -339,10 +339,10 @@ StaticPopupDialogs["ABYSSAL_WITHDRAW"] = {
     preferredIndex = 3,
 }
 
-function AbyssalStorage:ShowWithdrawDialog(entry, count)
+function PocketStorage:ShowWithdrawDialog(entry, count)
     local name, link = GetItemInfo(entry)
     local displayName = link or name or ("Item #" .. entry)
-    local dialog = StaticPopup_Show("ABYSSAL_WITHDRAW", displayName, count)
+    local dialog = StaticPopup_Show("POCKET_WITHDRAW", displayName, count)
     if dialog then
         dialog.data = { entry = entry, count = count }
     end
@@ -352,7 +352,7 @@ end
 -- Grid Update
 -- ============================================================================
 
-function AbyssalStorage:UpdateGrid()
+function PocketStorage:UpdateGrid()
     local scrollOffset = math.floor(scrollBar:GetValue())
     local startIndex = scrollOffset * ITEMS_PER_ROW + 1
     local totalCells = ITEMS_PER_ROW * VISIBLE_ROWS
@@ -378,8 +378,8 @@ function AbyssalStorage:UpdateGrid()
     end
 end
 
-function AbyssalStorage:UpdateUI()
-    if not AbyssalStorageFrame:IsShown() then return end
+function PocketStorage:UpdateUI()
+    if not PocketStorageFrame:IsShown() then return end
 
     BuildDisplayList()
 
@@ -417,11 +417,11 @@ hookFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 hookFrame:SetScript("OnEvent", function(self, event)
     if event == "PLAYER_ENTERING_WORLD" then
         hooksecurefunc("OpenAllBags", function()
-            AbyssalStorageFrame:Show()
-            AbyssalStorage:UpdateUI()
+            PocketStorageFrame:Show()
+            PocketStorage:UpdateUI()
         end)
         hooksecurefunc("CloseAllBags", function()
-            AbyssalStorageFrame:Hide()
+            PocketStorageFrame:Hide()
         end)
         self:UnregisterEvent("PLAYER_ENTERING_WORLD")
     end
@@ -462,11 +462,11 @@ local function GetMaxCraftsWithVault(id)
     for i = 1, numReagents do
         local reagentName, reagentTexture, reagentCount, playerReagentCount = GetTradeSkillReagentInfo(id, i)
         local reagentLink = GetTradeSkillReagentItemLink(id, i)
-        local reagentEntry = AbyssalStorage:EntryFromLink(reagentLink)
+        local reagentEntry = PocketStorage:EntryFromLink(reagentLink)
 
         local totalCount = playerReagentCount
         if reagentEntry then
-            totalCount = totalCount + AbyssalStorage:GetItemCount(reagentEntry)
+            totalCount = totalCount + PocketStorage:GetItemCount(reagentEntry)
         end
 
         if totalCount < reagentCount then
@@ -498,31 +498,31 @@ local function HookTradeSkill()
         -- Update reagent displays: show vault count as green label on top of icon
         for i = 1, 8 do
             local reagentFrame = _G["TradeSkillReagent" .. i]
-            if reagentFrame and reagentFrame.abyssalVaultLabel then
-                reagentFrame.abyssalVaultLabel:Hide()
+            if reagentFrame and reagentFrame.pocketVaultLabel then
+                reagentFrame.pocketVaultLabel:Hide()
             end
         end
 
         for i = 1, numReagents do
             local _, _, reagentCount, playerReagentCount = GetTradeSkillReagentInfo(id, i)
             local reagentLink = GetTradeSkillReagentItemLink(id, i)
-            local reagentEntry = AbyssalStorage:EntryFromLink(reagentLink)
+            local reagentEntry = PocketStorage:EntryFromLink(reagentLink)
 
             local reagentFrame = _G["TradeSkillReagent" .. i]
             if reagentEntry and reagentFrame then
-                local vaultCount = AbyssalStorage:GetItemCount(reagentEntry)
+                local vaultCount = PocketStorage:GetItemCount(reagentEntry)
                 if vaultCount > 0 then
                     -- Create or reuse the vault label on the icon
-                    if not reagentFrame.abyssalVaultLabel then
+                    if not reagentFrame.pocketVaultLabel then
                         local icon = _G["TradeSkillReagent" .. i .. "IconTexture"]
                         local parent = icon and icon:GetParent() or reagentFrame
                         local label = parent:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
                         label:SetPoint("TOP", icon or parent, "TOP", 0, -2)
                         label:SetJustifyH("CENTER")
-                        reagentFrame.abyssalVaultLabel = label
+                        reagentFrame.pocketVaultLabel = label
                     end
 
-                    local label = reagentFrame.abyssalVaultLabel
+                    local label = reagentFrame.pocketVaultLabel
                     local displayCount = vaultCount > 9999 and "9999+" or tostring(vaultCount)
                     label:SetText(displayCount)
                     label:SetTextColor(0.2, 1, 0.2)
@@ -562,7 +562,7 @@ local function HookTradeSkill()
         end
     end)
 
-    -- Hook Create button to use .abs craft when vault materials are needed
+    -- Hook Create button to use .ps craft when vault materials are needed
     if TradeSkillCreateButton then
         TradeSkillCreateButton:HookScript("PreClick", function(self)
             local id = TradeSkillFrame.selectedSkill
@@ -584,7 +584,7 @@ local function HookTradeSkill()
             local count = TradeSkillInputBox and TradeSkillInputBox:GetNumber() or 1
             if count < 1 then count = 1 end
 
-            AbyssalStorage:SendCommand("abs craft " .. spellId .. " " .. count)
+            PocketStorage:SendCommand("ps craft " .. spellId .. " " .. count)
         end)
     end
 
@@ -610,7 +610,7 @@ local function HookTradeSkill()
             local _, maxCrafts = GetMaxCraftsWithVault(id)
             if maxCrafts < 1 then return end
 
-            AbyssalStorage:SendCommand("abs craft " .. spellId .. " " .. maxCrafts)
+            PocketStorage:SendCommand("ps craft " .. spellId .. " " .. maxCrafts)
         end)
     end
 end
@@ -633,14 +633,14 @@ end
 -- Request item info for all vault items on show
 -- ============================================================================
 
-AbyssalStorageFrame:SetScript("OnShow", function(self)
+PocketStorageFrame:SetScript("OnShow", function(self)
     -- Trigger GetItemInfo for all items to populate client cache
-    for entry, _ in pairs(AbyssalStorage.items) do
+    for entry, _ in pairs(PocketStorage.items) do
         GetItemInfo(entry)
     end
     -- Slight delay to let item info queries return
-    AbyssalStorage.SetTimer(0.5, function()
-        AbyssalStorage:UpdateUI()
+    PocketStorage.SetTimer(0.5, function()
+        PocketStorage:UpdateUI()
     end)
-    AbyssalStorage:UpdateUI()
+    PocketStorage:UpdateUI()
 end)

@@ -1,6 +1,6 @@
-# mod-abyssal-storage
+# mod-pocket-storage
 
-Account-wide interdimensional vault for trade goods in AzerothCore (WoW 3.3.5).
+Account-wide pocket vault for trade goods in AzerothCore (WoW 3.3.5).
 
 Automatically deposits trade goods into a shared vault accessible by all characters on the account. Integrates with crafting and quests so vault materials are used seamlessly.
 
@@ -10,7 +10,7 @@ Automatically deposits trade goods into a shared vault accessible by all charact
 - **Crafting integration**: Vault reagents appear in the TradeSkill UI and are materialized on demand when crafting
 - **Quest integration**: Quest-required items are pulled from the vault automatically on turn-in
 - **Multi-craft**: "Create All" uses vault materials across the full batch
-- **Grid UI**: Searchable item grid with tooltips, opened via `/abs` or right-clicking the backpack
+- **Grid UI**: Searchable item grid with tooltips, opened via `/ps` or right-clicking the backpack
 - **Item tooltips**: Every item tooltip (bags, chat links, loot, auction house, professions) shows how many you have in the vault
 - **Real-time sync**: Vault state syncs on login and updates incrementally
 
@@ -18,11 +18,11 @@ Automatically deposits trade goods into a shared vault accessible by all charact
 
 | Command | Description |
 |---|---|
-| `/abs` | Toggle the vault UI |
-| `/abs deposit` | Deposit all trade goods from inventory |
-| `/abs withdraw <itemId> [count]` | Withdraw items (omit count for all) |
-| `/abs sync` | Force re-sync from server |
-| `/abs rules` | Open the Store/Keep lists (also the **Rules** button in the vault window) |
+| `/ps` | Toggle the vault UI |
+| `/ps deposit` | Deposit all trade goods from inventory |
+| `/ps withdraw <itemId> [count]` | Withdraw items (omit count for all) |
+| `/ps sync` | Force re-sync from server |
+| `/ps rules` | Open the Store/Keep lists (also the **Rules** button in the vault window) |
 
 ### Store and Keep lists
 
@@ -34,23 +34,23 @@ Each account has its own lists, edited in the addon's rules window by dropping a
 
 | Command | Description |
 |---|---|
-| `.abs rule store <itemId>` | Add an item to the Store list |
-| `.abs rule keep <itemId>` | Add an item to the Keep list |
-| `.abs rule remove <itemId>` | Remove an item from both lists |
-| `.abs autostore on\|off` | Turn auto-store on loot on or off for the account |
+| `.ps rule store <itemId>` | Add an item to the Store list |
+| `.ps rule keep <itemId>` | Add an item to the Keep list |
+| `.ps rule remove <itemId>` | Remove an item from both lists |
+| `.ps autostore on\|off` | Turn auto-store on loot on or off for the account |
 
 ### Sharing a vault between accounts
 
-Accounts can share one vault, for example when one player runs a whole raid team across several accounts. Players can set this up themselves (needs `AbyssalStorage.EnableSharing = 1`):
+Accounts can share one vault, for example when one player runs a whole raid team across several accounts. Players can set this up themselves (needs `PocketStorage.EnableSharing = 1`):
 
 | Command | Description |
 |---|---|
-| `.abs share invite <character>` | Invite the account of `<character>` to use your vault |
-| `.abs share accept` | Accept a pending invite. Your vault's items are added to the shared vault. |
-| `.abs share decline` | Decline a pending invite |
-| `.abs share leave` | Stop using the shared vault. The shared items stay; you start with an empty vault. |
-| `.abs share kick <character>` | Remove the account of `<character>` from your vault |
-| `.abs share list` | Show who shares your vault |
+| `.ps share invite <character>` | Invite the account of `<character>` to use your vault |
+| `.ps share accept` | Accept a pending invite. Your vault's items are added to the shared vault. |
+| `.ps share decline` | Decline a pending invite |
+| `.ps share leave` | Stop using the shared vault. The shared items stay; you start with an empty vault. |
+| `.ps share kick <character>` | Remove the account of `<character>` from your vault |
+| `.ps share list` | Show who shares your vault |
 
 All characters on an account share the same vault, so inviting one character invites their whole account. Players only see character names, never account names.
 
@@ -60,30 +60,35 @@ GMs can link accounts directly, without invites. These commands need administrat
 
 | Command | Description |
 |---|---|
-| `.abs link <account> <mainAccount>` | Make `<account>` use the vault of `<mainAccount>`. Its own items are merged into the shared vault. |
-| `.abs unlink <account>` | Give `<account>` its own, empty vault again. The shared items stay in the shared vault. |
+| `.ps link <account> <mainAccount>` | Make `<account>` use the vault of `<mainAccount>`. Its own items are merged into the shared vault. |
+| `.ps unlink <account>` | Give `<account>` its own, empty vault again. The shared items stay in the shared vault. |
 
-Example: `.abs link raider02 raider01`, `.abs link raider03 raider01`, and so on.
+Example: `.ps link raider02 raider01`, `.ps link raider03 raider01`, and so on.
 
 ## Configuration
 
-In `mod_abyssal_storage.conf`:
+In `mod_pocket_storage.conf`:
 
 ```
-AbyssalStorage.Enable = 1
-AbyssalStorage.EnableSharing = 1
-AbyssalStorage.ExtraItems = "4278"
-AbyssalStorage.RandomBotAccountPrefix = ""
+PocketStorage.Enable = 1
+PocketStorage.EnableSharing = 1
+PocketStorage.DepositMessage = 1
+PocketStorage.ExtraItems = "4278"
+PocketStorage.RandomBotAccountPrefix = ""
 ```
 
-`AbyssalStorage.RandomBotAccountPrefix` is the username prefix of random playerbot accounts, which the vault ignores. Left empty, it follows mod-playerbots' `Playerbots.RandomBotAccountPrefix` (or `rndbot`).
+`PocketStorage.RandomBotAccountPrefix` is the username prefix of random playerbot accounts, which the vault ignores. Left empty, it follows mod-playerbots' `Playerbots.RandomBotAccountPrefix` (or `rndbot`).
 
-`AbyssalStorage.ExtraItems` lists item ids to store on top of trade goods and gems, for gathered items the game files as quest or misc items (4278 is Lesser Bloodstone Ore).
+`PocketStorage.ExtraItems` lists item ids to store on top of trade goods and gems, for gathered items the game files as quest or misc items (4278 is Lesser Bloodstone Ore).
+
+## Upgrading from Abyssal Storage
+
+This module used to be called Abyssal Storage (`mod-abyssal-storage`). Move it to `modules/mod-pocket-storage`, re-run CMake, set up `mod_pocket_storage.conf` with the `PocketStorage.*` keys, and replace the `AbyssalStorage` addon with `PocketStorage`. On its first start, the server renames the old `abyssal_storage*` tables to `pocket_storage*`, so vault contents, shares and lists carry over.
 
 ## Installation
 
-1. Clone into `modules/mod-abyssal-storage`
+1. Clone into `modules/mod-pocket-storage`
 2. Re-run CMake and build
-3. Copy `conf/mod_abyssal_storage.conf.dist` to your server's config directory
-4. Run the files in `data/sql/db-characters/` (`abyssal_storage.sql`, `abyssal_storage_link.sql`, `abyssal_storage_invite.sql`, `abyssal_storage_rule.sql`) against your characters database
-5. Copy the `addon/AbyssalStorage` folder into your WoW `Interface/AddOns` directory
+3. Copy `conf/mod_pocket_storage.conf.dist` to your server's config directory
+4. Run the files in `data/sql/db-characters/` (`pocket_storage.sql`, `pocket_storage_link.sql`, `pocket_storage_invite.sql`, `pocket_storage_rule.sql`) against your characters database
+5. Copy the `addon/PocketStorage` folder into your WoW `Interface/AddOns` directory

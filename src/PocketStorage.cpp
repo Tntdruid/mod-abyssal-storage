@@ -1,4 +1,4 @@
-#include "AbyssalStorage.h"
+#include "PocketStorage.h"
 #include "DatabaseEnv.h"
 #include "ItemTemplate.h"
 #include "Player.h"
@@ -12,34 +12,73 @@
 #include <algorithm>
 #include <sstream>
 
-AbyssalPlayerData* GetAbyssalData(Player* player)
+PocketPlayerData* GetPocketData(Player* player)
 {
     if (!player)
         return nullptr;
-    return player->CustomData.GetDefault<AbyssalPlayerData>("AbyssalData");
+    return player->CustomData.GetDefault<PocketPlayerData>("PocketData");
 }
 
-AbyssalStorageMgr* AbyssalStorageMgr::instance()
+PocketStorageMgr* PocketStorageMgr::instance()
 {
-    static AbyssalStorageMgr instance;
+    static PocketStorageMgr instance;
     return &instance;
 }
 
-uint32 AbyssalStorageMgr::LookupStorageOwner(uint32 accountId)
+static bool CharacterTableExists(std::string const& table)
 {
-    QueryResult result = CharacterDatabase.Query("SELECT owner_account_id FROM abyssal_storage_link WHERE account_id = {}", accountId);
+    return bool(CharacterDatabase.Query("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{}'", table));
+}
+
+void PocketStorageMgr::MigrateLegacyTables()
+{
+    // The module used to be called Abyssal Storage; carry its data over to the new table names
+    static std::pair<char const*, char const*> const tables[] =
+    {
+        { "abyssal_storage",          "pocket_storage" },
+        { "abyssal_storage_link",     "pocket_storage_link" },
+        { "abyssal_storage_invite",   "pocket_storage_invite" },
+        { "abyssal_storage_rule",     "pocket_storage_rule" },
+        { "abyssal_storage_settings", "pocket_storage_settings" },
+    };
+
+    for (auto const& [oldName, newName] : tables)
+    {
+        if (!CharacterTableExists(oldName))
+            continue;
+
+        if (CharacterTableExists(newName))
+        {
+            // The new SQL files may already have created an empty table; never overwrite real data
+            if (CharacterDatabase.Query("SELECT 1 FROM `{}` LIMIT 1", newName))
+            {
+                LOG_ERROR("module", "PocketStorage: both `{}` and `{}` hold data, so `{}` was not migrated. Merge or drop one of them by hand.",
+                    oldName, newName, oldName);
+                continue;
+            }
+            CharacterDatabase.DirectExecute("DROP TABLE `{}`", newName);
+        }
+
+        CharacterDatabase.DirectExecute("RENAME TABLE `{}` TO `{}`", oldName, newName);
+        LOG_INFO("module", "PocketStorage: renamed table `{}` to `{}`.", oldName, newName);
+    }
+}
+
+uint32 PocketStorageMgr::LookupStorageOwner(uint32 accountId)
+{
+    QueryResult result = CharacterDatabase.Query("SELECT owner_account_id FROM pocket_storage_link WHERE account_id = {}", accountId);
     if (!result)
         return accountId;
 
     return result->Fetch()[0].Get<uint32>();
 }
 
-uint32 AbyssalStorageMgr::GetStorageId(Player* player)
+uint32 PocketStorageMgr::GetStorageId(Player* player)
 {
     return GetStorageIdForAccount(player->GetSession()->GetAccountId());
 }
 
-uint32 AbyssalStorageMgr::GetStorageIdForAccount(uint32 accountId)
+uint32 PocketStorageMgr::GetStorageIdForAccount(uint32 accountId)
 {
     {
         std::lock_guard<std::mutex> lock(_storageMutex);
@@ -55,15 +94,15 @@ uint32 AbyssalStorageMgr::GetStorageIdForAccount(uint32 accountId)
     return _accountStorage.emplace(accountId, storageId).first->second;
 }
 
-void AbyssalStorageMgr::ForgetAccountStorage()
+void PocketStorageMgr::ForgetAccountStorage()
 {
     std::lock_guard<std::mutex> lock(_storageMutex);
     _accountStorage.clear();
 }
 
-std::unordered_map<uint32, uint32> AbyssalStorageMgr::QueryStorageItems(uint32 storageId)
+std::unordered_map<uint32, uint32> PocketStorageMgr::QueryStorageItems(uint32 storageId)
 {
-    QueryResult result = CharacterDatabase.Query("SELECT item_entry, count FROM abyssal_storage WHERE account_id = {}", storageId);
+    QueryResult result = CharacterDatabase.Query("SELECT item_entry, count FROM pocket_storage WHERE account_id = {}", storageId);
 
     std::unordered_map<uint32, uint32> items;
     if (result)
@@ -80,28 +119,28 @@ std::unordered_map<uint32, uint32> AbyssalStorageMgr::QueryStorageItems(uint32 s
     return items;
 }
 
-AbyssalStorageMgr::AccountSettings AbyssalStorageMgr::QueryAccountSettings(uint32 accountId)
+PocketStorageMgr::AccountSettings PocketStorageMgr::QueryAccountSettings(uint32 accountId)
 {
     AccountSettings settings;
 
-    if (QueryResult result = CharacterDatabase.Query("SELECT item_entry, rule FROM abyssal_storage_rule WHERE account_id = {}", accountId))
+    if (QueryResult result = CharacterDatabase.Query("SELECT item_entry, rule FROM pocket_storage_rule WHERE account_id = {}", accountId))
     {
         do
         {
             Field* fields = result->Fetch();
             uint8 rule = fields[1].Get<uint8>();
-            if (rule == uint8(AbyssalItemRule::Store) || rule == uint8(AbyssalItemRule::Keep))
-                settings.rules[fields[0].Get<uint32>()] = AbyssalItemRule(rule);
+            if (rule == uint8(PocketItemRule::Store) || rule == uint8(PocketItemRule::Keep))
+                settings.rules[fields[0].Get<uint32>()] = PocketItemRule(rule);
         } while (result->NextRow());
     }
 
-    if (QueryResult result = CharacterDatabase.Query("SELECT auto_store FROM abyssal_storage_settings WHERE account_id = {}", accountId))
+    if (QueryResult result = CharacterDatabase.Query("SELECT auto_store FROM pocket_storage_settings WHERE account_id = {}", accountId))
         settings.autoStoreOnLoot = result->Fetch()[0].Get<uint8>() != 0;
 
     return settings;
 }
 
-void AbyssalStorageMgr::LoadAccountData(Player* player)
+void PocketStorageMgr::LoadAccountData(Player* player)
 {
     uint32 accountId = player->GetSession()->GetAccountId();
     uint32 storageId = GetStorageIdForAccount(accountId);
@@ -132,7 +171,7 @@ void AbyssalStorageMgr::LoadAccountData(Player* player)
     }
 }
 
-void AbyssalStorageMgr::UnloadAccountData(Player* player)
+void PocketStorageMgr::UnloadAccountData(Player* player)
 {
     uint32 accountId = player->GetSession()->GetAccountId();
     uint32 storageId = GetStorageId(player);
@@ -160,13 +199,13 @@ void AbyssalStorageMgr::UnloadAccountData(Player* player)
     _accountSettings.erase(accountId);
 }
 
-bool AbyssalStorageMgr::IsAccountLoaded(uint32 storageId)
+bool PocketStorageMgr::IsAccountLoaded(uint32 storageId)
 {
     std::lock_guard<std::mutex> lock(_storageMutex);
     return _storage.find(storageId) != _storage.end();
 }
 
-void AbyssalStorageMgr::SwitchAccountStorage(uint32 accountId, uint32 newStorageId, bool mergeItems)
+void PocketStorageMgr::SwitchAccountStorage(uint32 accountId, uint32 newStorageId, bool mergeItems)
 {
     uint32 oldStorageId = GetStorageIdForAccount(accountId);
     if (oldStorageId == newStorageId)
@@ -236,18 +275,18 @@ void AbyssalStorageMgr::SwitchAccountStorage(uint32 accountId, uint32 newStorage
         BroadcastItemCount(newStorageId, entry);
 }
 
-void AbyssalStorageMgr::DepositItem(uint32 accountId, uint32 itemEntry, uint32 count)
+void PocketStorageMgr::DepositItem(uint32 accountId, uint32 itemEntry, uint32 count)
 {
     {
         std::lock_guard<std::mutex> lock(_storageMutex);
         _storage[accountId][itemEntry] += count;
     }
 
-    CharacterDatabase.Execute("INSERT INTO abyssal_storage (account_id, item_entry, count) VALUES ({}, {}, {}) "
+    CharacterDatabase.Execute("INSERT INTO pocket_storage (account_id, item_entry, count) VALUES ({}, {}, {}) "
         "ON DUPLICATE KEY UPDATE count = count + {}", accountId, itemEntry, count, count);
 }
 
-bool AbyssalStorageMgr::WithdrawItem(uint32 accountId, uint32 itemEntry, uint32 count)
+bool PocketStorageMgr::WithdrawItem(uint32 accountId, uint32 itemEntry, uint32 count)
 {
     std::lock_guard<std::mutex> lock(_storageMutex);
 
@@ -264,18 +303,18 @@ bool AbyssalStorageMgr::WithdrawItem(uint32 accountId, uint32 itemEntry, uint32 
     if (itemIt->second == 0)
     {
         accIt->second.erase(itemIt);
-        CharacterDatabase.Execute("DELETE FROM abyssal_storage WHERE account_id = {} AND item_entry = {}", accountId, itemEntry);
+        CharacterDatabase.Execute("DELETE FROM pocket_storage WHERE account_id = {} AND item_entry = {}", accountId, itemEntry);
     }
     else
     {
-        CharacterDatabase.Execute("UPDATE abyssal_storage SET count = {} WHERE account_id = {} AND item_entry = {}",
+        CharacterDatabase.Execute("UPDATE pocket_storage SET count = {} WHERE account_id = {} AND item_entry = {}",
             itemIt->second, accountId, itemEntry);
     }
 
     return true;
 }
 
-uint32 AbyssalStorageMgr::GetItemCount(uint32 accountId, uint32 itemEntry)
+uint32 PocketStorageMgr::GetItemCount(uint32 accountId, uint32 itemEntry)
 {
     std::lock_guard<std::mutex> lock(_storageMutex);
 
@@ -290,7 +329,7 @@ uint32 AbyssalStorageMgr::GetItemCount(uint32 accountId, uint32 itemEntry)
     return itemIt->second;
 }
 
-std::unordered_map<uint32, uint32> AbyssalStorageMgr::GetAllItems(uint32 accountId)
+std::unordered_map<uint32, uint32> PocketStorageMgr::GetAllItems(uint32 accountId)
 {
     std::lock_guard<std::mutex> lock(_storageMutex);
 
@@ -301,7 +340,7 @@ std::unordered_map<uint32, uint32> AbyssalStorageMgr::GetAllItems(uint32 account
     return accIt->second;
 }
 
-uint32 AbyssalStorageMgr::GetQuestReservedCount(Player* player, uint32 itemId)
+uint32 PocketStorageMgr::GetQuestReservedCount(Player* player, uint32 itemId)
 {
     uint32 reserved = 0;
 
@@ -329,13 +368,13 @@ uint32 AbyssalStorageMgr::GetQuestReservedCount(Player* player, uint32 itemId)
     return reserved;
 }
 
-bool AbyssalStorageMgr::IsItemRequiredByActiveQuest(Player* player, uint32 itemId)
+bool PocketStorageMgr::IsItemRequiredByActiveQuest(Player* player, uint32 itemId)
 {
     uint32 reserved = GetQuestReservedCount(player, itemId);
     return reserved > 0 && player->GetItemCount(itemId) <= reserved;
 }
 
-void AbyssalStorageMgr::SetExtraItems(std::string const& itemList)
+void PocketStorageMgr::SetExtraItems(std::string const& itemList)
 {
     _extraItems.clear();
 
@@ -352,22 +391,22 @@ void AbyssalStorageMgr::SetExtraItems(std::string const& itemList)
         if (itemId)
             _extraItems.insert(itemId);
         else
-            LOG_ERROR("module", "AbyssalStorage.ExtraItems: '{}' is not a valid item id, ignored.", token);
+            LOG_ERROR("module", "PocketStorage.ExtraItems: '{}' is not a valid item id, ignored.", token);
     }
 }
 
-bool AbyssalStorageMgr::ShouldAutoStore(Player* player, ItemTemplate const* itemTemplate)
+bool PocketStorageMgr::ShouldAutoStore(Player* player, ItemTemplate const* itemTemplate)
 {
     if (!itemTemplate)
         return false;
 
-    AbyssalItemRule rule = GetItemRule(player->GetSession()->GetAccountId(), itemTemplate->ItemId);
-    if (rule == AbyssalItemRule::Keep)
+    PocketItemRule rule = GetItemRule(player->GetSession()->GetAccountId(), itemTemplate->ItemId);
+    if (rule == PocketItemRule::Keep)
         return false;
 
     // The vault keeps only entry and count, so a Store rule never applies to unstackable
     // items, whose enchants, gems and durability would be lost
-    if (rule != AbyssalItemRule::Store || itemTemplate->GetMaxStackSize() <= 1)
+    if (rule != PocketItemRule::Store || itemTemplate->GetMaxStackSize() <= 1)
     {
         if (itemTemplate->Class != ITEM_CLASS_TRADE_GOODS && itemTemplate->Class != ITEM_CLASS_GEM
             && _extraItems.find(itemTemplate->ItemId) == _extraItems.end())
@@ -384,19 +423,19 @@ bool AbyssalStorageMgr::ShouldAutoStore(Player* player, ItemTemplate const* item
     return true;
 }
 
-AbyssalItemRule AbyssalStorageMgr::GetItemRule(uint32 accountId, uint32 itemEntry)
+PocketItemRule PocketStorageMgr::GetItemRule(uint32 accountId, uint32 itemEntry)
 {
     std::lock_guard<std::mutex> lock(_storageMutex);
 
     auto accIt = _accountSettings.find(accountId);
     if (accIt == _accountSettings.end())
-        return AbyssalItemRule::None;
+        return PocketItemRule::None;
 
     auto ruleIt = accIt->second.rules.find(itemEntry);
-    return ruleIt == accIt->second.rules.end() ? AbyssalItemRule::None : ruleIt->second;
+    return ruleIt == accIt->second.rules.end() ? PocketItemRule::None : ruleIt->second;
 }
 
-std::size_t AbyssalStorageMgr::GetItemRuleCount(uint32 accountId)
+std::size_t PocketStorageMgr::GetItemRuleCount(uint32 accountId)
 {
     std::lock_guard<std::mutex> lock(_storageMutex);
 
@@ -404,28 +443,28 @@ std::size_t AbyssalStorageMgr::GetItemRuleCount(uint32 accountId)
     return accIt == _accountSettings.end() ? 0 : accIt->second.rules.size();
 }
 
-void AbyssalStorageMgr::SetItemRule(uint32 accountId, uint32 itemEntry, AbyssalItemRule rule)
+void PocketStorageMgr::SetItemRule(uint32 accountId, uint32 itemEntry, PocketItemRule rule)
 {
     {
         std::lock_guard<std::mutex> lock(_storageMutex);
         auto& rules = _accountSettings[accountId].rules;
-        if (rule == AbyssalItemRule::None)
+        if (rule == PocketItemRule::None)
             rules.erase(itemEntry);
         else
             rules[itemEntry] = rule;
     }
 
-    if (rule == AbyssalItemRule::None)
-        CharacterDatabase.Execute("DELETE FROM abyssal_storage_rule WHERE account_id = {} AND item_entry = {}", accountId, itemEntry);
+    if (rule == PocketItemRule::None)
+        CharacterDatabase.Execute("DELETE FROM pocket_storage_rule WHERE account_id = {} AND item_entry = {}", accountId, itemEntry);
     else
-        CharacterDatabase.Execute("REPLACE INTO abyssal_storage_rule (account_id, item_entry, rule) VALUES ({}, {}, {})",
+        CharacterDatabase.Execute("REPLACE INTO pocket_storage_rule (account_id, item_entry, rule) VALUES ({}, {}, {})",
             accountId, itemEntry, uint32(rule)); // uint8 would be formatted as a character
 
-    char const* code = rule == AbyssalItemRule::Store ? "S" : rule == AbyssalItemRule::Keep ? "K" : "N";
+    char const* code = rule == PocketItemRule::Store ? "S" : rule == PocketItemRule::Keep ? "K" : "N";
     SendToAccount(accountId, std::string("RULE:") + code + ":" + std::to_string(itemEntry));
 }
 
-bool AbyssalStorageMgr::IsAutoStoreOnLoot(uint32 accountId)
+bool PocketStorageMgr::IsAutoStoreOnLoot(uint32 accountId)
 {
     std::lock_guard<std::mutex> lock(_storageMutex);
 
@@ -433,20 +472,20 @@ bool AbyssalStorageMgr::IsAutoStoreOnLoot(uint32 accountId)
     return accIt == _accountSettings.end() || accIt->second.autoStoreOnLoot;
 }
 
-void AbyssalStorageMgr::SetAutoStoreOnLoot(uint32 accountId, bool enabled)
+void PocketStorageMgr::SetAutoStoreOnLoot(uint32 accountId, bool enabled)
 {
     {
         std::lock_guard<std::mutex> lock(_storageMutex);
         _accountSettings[accountId].autoStoreOnLoot = enabled;
     }
 
-    CharacterDatabase.Execute("REPLACE INTO abyssal_storage_settings (account_id, auto_store) VALUES ({}, {})",
+    CharacterDatabase.Execute("REPLACE INTO pocket_storage_settings (account_id, auto_store) VALUES ({}, {})",
         accountId, enabled ? 1 : 0);
 
     SendToAccount(accountId, std::string("AUTO:") + (enabled ? "1" : "0"));
 }
 
-void AbyssalStorageMgr::SendToAccount(uint32 accountId, std::string const& message)
+void PocketStorageMgr::SendToAccount(uint32 accountId, std::string const& message)
 {
     std::vector<ObjectGuid> members;
     {
@@ -464,7 +503,7 @@ void AbyssalStorageMgr::SendToAccount(uint32 accountId, std::string const& messa
 
 // RULES:BEGIN, then the ids in short RULES:S:/RULES:K: lines, then RULES:END and AUTO:<0|1>.
 // The lines are built here, since SendAddonMessage only knows how to split SYNC-style lists.
-void AbyssalStorageMgr::SendAccountSettings(Player* player)
+void PocketStorageMgr::SendAccountSettings(Player* player)
 {
     uint32 accountId = player->GetSession()->GetAccountId();
 
@@ -477,7 +516,7 @@ void AbyssalStorageMgr::SendAccountSettings(Player* player)
         if (accIt != _accountSettings.end())
         {
             for (auto const& [entry, rule] : accIt->second.rules)
-                (rule == AbyssalItemRule::Store ? store : keep).push_back(entry);
+                (rule == PocketItemRule::Store ? store : keep).push_back(entry);
             autoStore = accIt->second.autoStoreOnLoot;
         }
     }
@@ -529,11 +568,11 @@ static void SendOnePacket(Player* player, std::string const& msg)
     player->GetSession()->SendPacket(&data);
 }
 
-void AbyssalStorageMgr::SendAddonMessage(Player* player, std::string const& message)
+void PocketStorageMgr::SendAddonMessage(Player* player, std::string const& message)
 {
-    // Prefix with "ABYS\t" so client receives arg1="ABYS", arg2=message
+    // Prefix with "PCKT\t" so client receives arg1="PCKT", arg2=message
     const size_t MAX_MSG_LEN = 240; // leave room for prefix
-    std::string fullMsg = "ABYS\t" + message;
+    std::string fullMsg = "PCKT\t" + message;
 
     if (fullMsg.length() <= MAX_MSG_LEN)
     {
@@ -545,7 +584,7 @@ void AbyssalStorageMgr::SendAddonMessage(Player* player, std::string const& mess
     size_t prefixEnd = message.find(':');
     if (prefixEnd == std::string::npos)
     {
-        SendOnePacket(player, ("ABYS\t" + message.substr(0, MAX_MSG_LEN - 5)));
+        SendOnePacket(player, ("PCKT\t" + message.substr(0, MAX_MSG_LEN - 5)));
         return;
     }
     prefixEnd++;
@@ -572,7 +611,7 @@ void AbyssalStorageMgr::SendAddonMessage(Player* player, std::string const& mess
 
         if (chunk.length() > prefix.length() && chunk.length() + 1 + entry.length() + 5 > MAX_MSG_LEN)
         {
-            SendOnePacket(player, "ABYS\t" + chunk);
+            SendOnePacket(player, "PCKT\t" + chunk);
             chunk = prefix;
         }
 
@@ -582,10 +621,10 @@ void AbyssalStorageMgr::SendAddonMessage(Player* player, std::string const& mess
     }
 
     if (chunk.length() > prefix.length())
-        SendOnePacket(player, "ABYS\t" + chunk);
+        SendOnePacket(player, "PCKT\t" + chunk);
 }
 
-void AbyssalStorageMgr::SendFullSync(Player* player)
+void PocketStorageMgr::SendFullSync(Player* player)
 {
     auto items = GetAllItems(GetStorageId(player));
 
@@ -608,19 +647,19 @@ void AbyssalStorageMgr::SendFullSync(Player* player)
     SendAddonMessage(player, msg);
 }
 
-void AbyssalStorageMgr::SendItemUpdate(Player* player, uint32 itemEntry, uint32 count)
+void PocketStorageMgr::SendItemUpdate(Player* player, uint32 itemEntry, uint32 count)
 {
     std::string msg = "UPD:" + std::to_string(itemEntry) + "," + std::to_string(count);
     SendAddonMessage(player, msg);
 }
 
-void AbyssalStorageMgr::SendItemDelete(Player* player, uint32 itemEntry)
+void PocketStorageMgr::SendItemDelete(Player* player, uint32 itemEntry)
 {
     std::string msg = "DEL:" + std::to_string(itemEntry);
     SendAddonMessage(player, msg);
 }
 
-void AbyssalStorageMgr::BroadcastItemCount(uint32 storageId, uint32 itemEntry)
+void PocketStorageMgr::BroadcastItemCount(uint32 storageId, uint32 itemEntry)
 {
     uint32 count = GetItemCount(storageId, itemEntry);
 

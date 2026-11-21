@@ -1,4 +1,4 @@
-#include "AbyssalStorage.h"
+#include "PocketStorage.h"
 #include "AccountMgr.h"
 #include "CharacterCache.h"
 #include "Chat.h"
@@ -28,7 +28,7 @@ static bool IsRandomBot(Player* player)
     if (!player)
         return false;
 
-    AbyssalPlayerData* data = GetAbyssalData(player);
+    PocketPlayerData* data = GetPocketData(player);
     if (data->randomBotChecked)
         return data->isRandomBot;
 
@@ -40,7 +40,7 @@ static bool IsRandomBot(Player* player)
     if (!sAccountMgr->GetName(accountId, username))
         return false;
     // Case-insensitive prefix check; the configured prefix is already lowercase
-    std::string const& botPrefix = sAbyssalStorageMgr->GetRandomBotPrefix();
+    std::string const& botPrefix = sPocketStorageMgr->GetRandomBotPrefix();
     if (botPrefix.empty() || username.size() < botPrefix.size())
         return false;
     std::string prefix = username.substr(0, botPrefix.size());
@@ -50,11 +50,11 @@ static bool IsRandomBot(Player* player)
     return data->isRandomBot;
 }
 
-// AbyssalStorage.RandomBotAccountPrefix wins; when it is empty, follow mod-playerbots' own
+// PocketStorage.RandomBotAccountPrefix wins; when it is empty, follow mod-playerbots' own
 // setting (current and older option names), so realms with a custom prefix work unchanged
 static std::string LoadRandomBotPrefix()
 {
-    std::string prefix = sConfigMgr->GetOption<std::string>("AbyssalStorage.RandomBotAccountPrefix", "", false);
+    std::string prefix = sConfigMgr->GetOption<std::string>("PocketStorage.RandomBotAccountPrefix", "", false);
     if (prefix.empty())
         prefix = sConfigMgr->GetOption<std::string>("Playerbots.RandomBotAccountPrefix", "", false);
     if (prefix.empty())
@@ -83,21 +83,28 @@ static std::string BuildItemLink(uint32 itemEntry)
 }
 
 // ============================================================================
-// WorldScript — Config Loading
+// WorldScript — Config Loading, Table Migration
 // ============================================================================
 
-class AbyssalStorageWorldScript : public WorldScript
+class PocketStorageWorldScript : public WorldScript
 {
 public:
-    AbyssalStorageWorldScript() : WorldScript("AbyssalStorageWorldScript") { }
+    PocketStorageWorldScript() : WorldScript("PocketStorageWorldScript") { }
 
     void OnAfterConfigLoad(bool /*reload*/) override
     {
-        sAbyssalStorageMgr->SetEnabled(sConfigMgr->GetOption<bool>("AbyssalStorage.Enable", true));
-        sAbyssalStorageMgr->SetSharingEnabled(sConfigMgr->GetOption<bool>("AbyssalStorage.EnableSharing", true));
-        sAbyssalStorageMgr->SetExtraItems(sConfigMgr->GetOption<std::string>("AbyssalStorage.ExtraItems", "4278"));
-        sAbyssalStorageMgr->SetRandomBotPrefix(LoadRandomBotPrefix());
-        LOG_INFO("module", "AbyssalStorage: ignoring bot accounts starting with '{}'.", sAbyssalStorageMgr->GetRandomBotPrefix());
+        sPocketStorageMgr->SetEnabled(sConfigMgr->GetOption<bool>("PocketStorage.Enable", true));
+        sPocketStorageMgr->SetSharingEnabled(sConfigMgr->GetOption<bool>("PocketStorage.EnableSharing", true));
+        sPocketStorageMgr->SetDepositMessageEnabled(sConfigMgr->GetOption<bool>("PocketStorage.DepositMessage", true));
+        sPocketStorageMgr->SetExtraItems(sConfigMgr->GetOption<std::string>("PocketStorage.ExtraItems", "4278"));
+        sPocketStorageMgr->SetRandomBotPrefix(LoadRandomBotPrefix());
+        LOG_INFO("module", "PocketStorage: ignoring bot accounts starting with '{}'.", sPocketStorageMgr->GetRandomBotPrefix());
+    }
+
+    // Runs once the databases are open and before anyone can log in
+    void OnStartup() override
+    {
+        sPocketStorageMgr->MigrateLegacyTables();
     }
 };
 
@@ -105,10 +112,10 @@ public:
 // PlayerScript — Login/Logout, Item Acquisition
 // ============================================================================
 
-class AbyssalStoragePlayerScript : public PlayerScript
+class PocketStoragePlayerScript : public PlayerScript
 {
 public:
-    AbyssalStoragePlayerScript() : PlayerScript("AbyssalStoragePlayerScript", {
+    PocketStoragePlayerScript() : PlayerScript("PocketStoragePlayerScript", {
         PLAYERHOOK_ON_LOGIN,
         PLAYERHOOK_ON_LOGOUT,
         PLAYERHOOK_ON_UPDATE,
@@ -119,36 +126,36 @@ public:
 
     void OnPlayerLogin(Player* player) override
     {
-        if (!sAbyssalStorageMgr->IsEnabled())
+        if (!sPocketStorageMgr->IsEnabled())
             return;
 
         if (IsRandomBot(player))
             return;
 
-        sAbyssalStorageMgr->LoadAccountData(player);
-        sAbyssalStorageMgr->SendFullSync(player);
-        sAbyssalStorageMgr->SendAccountSettings(player);
+        sPocketStorageMgr->LoadAccountData(player);
+        sPocketStorageMgr->SendFullSync(player);
+        sPocketStorageMgr->SendAccountSettings(player);
 
-        if (sAbyssalStorageMgr->IsSharingEnabled())
+        if (sPocketStorageMgr->IsSharingEnabled())
         {
-            QueryResult invite = CharacterDatabase.Query("SELECT inviter_name FROM abyssal_storage_invite WHERE invitee_account_id = {}",
+            QueryResult invite = CharacterDatabase.Query("SELECT inviter_name FROM pocket_storage_invite WHERE invitee_account_id = {}",
                 player->GetSession()->GetAccountId());
             if (invite)
-                ChatHandler(player->GetSession()).PSendSysMessage("Abyssal Storage: {} has invited you to share their vault. Type .abs share accept or .abs share decline.",
+                ChatHandler(player->GetSession()).PSendSysMessage("Pocket Storage: {} has invited you to share their vault. Type .ps share accept or .ps share decline.",
                     invite->Fetch()[0].Get<std::string>());
         }
     }
 
     void OnPlayerLogout(Player* player) override
     {
-        if (!sAbyssalStorageMgr->IsEnabled())
+        if (!sPocketStorageMgr->IsEnabled())
             return;
 
         if (IsRandomBot(player))
             return;
 
-        uint32 storageId = sAbyssalStorageMgr->GetStorageId(player);
-        AbyssalPlayerData* data = GetAbyssalData(player);
+        uint32 storageId = sPocketStorageMgr->GetStorageId(player);
+        PocketPlayerData* data = GetPocketData(player);
 
         // Re-vault any materialized items still in inventory
         if (data && !data->materializedItems.empty())
@@ -161,31 +168,31 @@ public:
                     uint32 entry = item->GetEntry();
                     uint32 count = item->GetCount();
                     player->DestroyItemCount(entry, count, true);
-                    sAbyssalStorageMgr->DepositItem(storageId, entry, count);
-                    sAbyssalStorageMgr->BroadcastItemCount(storageId, entry);
+                    sPocketStorageMgr->DepositItem(storageId, entry, count);
+                    sPocketStorageMgr->BroadcastItemCount(storageId, entry);
                 }
             }
             data->materializedItems.clear();
         }
 
         // Only unloads once no other player sharing this vault is online
-        sAbyssalStorageMgr->UnloadAccountData(player);
+        sPocketStorageMgr->UnloadAccountData(player);
     }
 
     void OnPlayerStoreNewItem(Player* player, Item* item, uint32 count) override
     {
-        if (!sAbyssalStorageMgr->IsEnabled() || !player || !item)
+        if (!sPocketStorageMgr->IsEnabled() || !player || !item)
             return;
 
         if (IsRandomBot(player))
             return;
 
-        AbyssalPlayerData* data = GetAbyssalData(player);
+        PocketPlayerData* data = GetPocketData(player);
         if (!data || !data->autoStoreEnabled)
             return;
 
         // Switched off for the account from the addon's rules window
-        if (!sAbyssalStorageMgr->IsAutoStoreOnLoot(player->GetSession()->GetAccountId()))
+        if (!sPocketStorageMgr->IsAutoStoreOnLoot(player->GetSession()->GetAccountId()))
             return;
 
         // Don't auto-store items being materialized from vault
@@ -197,7 +204,7 @@ public:
             return;
 
         ItemTemplate const* itemTemplate = item->GetTemplate();
-        if (!sAbyssalStorageMgr->ShouldAutoStore(player, itemTemplate))
+        if (!sPocketStorageMgr->ShouldAutoStore(player, itemTemplate))
             return;
 
         // Defer the deposit — destroying items inside this hook crashes the server
@@ -207,13 +214,13 @@ public:
 
     void OnPlayerUpdate(Player* player, uint32 /*p_time*/) override
     {
-        if (!sAbyssalStorageMgr->IsEnabled() || !player)
+        if (!sPocketStorageMgr->IsEnabled() || !player)
             return;
 
         if (IsRandomBot(player))
             return;
 
-        AbyssalPlayerData* data = GetAbyssalData(player);
+        PocketPlayerData* data = GetPocketData(player);
         if (!data || data->pendingDeposits.empty())
             return;
 
@@ -221,7 +228,7 @@ public:
         std::vector<PendingDeposit> deposits = std::move(data->pendingDeposits);
         data->pendingDeposits.clear();
 
-        uint32 storageId = sAbyssalStorageMgr->GetStorageId(player);
+        uint32 storageId = sPocketStorageMgr->GetStorageId(player);
 
         for (auto const& dep : deposits)
         {
@@ -233,14 +240,18 @@ public:
 
             // Never deposit below the quest-required threshold — guards against
             // timing races where item->GetCount() or quest status was stale when queued
-            uint32 questReserved = sAbyssalStorageMgr->GetQuestReservedCount(player, dep.itemEntry);
+            uint32 questReserved = sPocketStorageMgr->GetQuestReservedCount(player, dep.itemEntry);
             if (playerHas <= questReserved)
                 continue;
             toDeposit = std::min(toDeposit, playerHas - questReserved);
 
             player->DestroyItemCount(dep.itemEntry, toDeposit, true);
-            sAbyssalStorageMgr->DepositItem(storageId, dep.itemEntry, toDeposit);
-            sAbyssalStorageMgr->BroadcastItemCount(storageId, dep.itemEntry);
+            sPocketStorageMgr->DepositItem(storageId, dep.itemEntry, toDeposit);
+            sPocketStorageMgr->BroadcastItemCount(storageId, dep.itemEntry);
+
+            if (sPocketStorageMgr->IsDepositMessageEnabled())
+                ChatHandler(player->GetSession()).PSendSysMessage("Pocket Storage: Stored {} x{} ({} in storage).",
+                    BuildItemLink(dep.itemEntry), toDeposit, sPocketStorageMgr->GetItemCount(storageId, dep.itemEntry));
         }
     }
 
@@ -265,20 +276,20 @@ private:
     // Off for quest accept, where the items must stay in bags until turn-in.
     static void MaterializeQuestItems(Player* player, Quest const* quest, bool trackAsMaterialized)
     {
-        if (!sAbyssalStorageMgr->IsEnabled() || !player)
+        if (!sPocketStorageMgr->IsEnabled() || !player)
             return;
 
         if (IsRandomBot(player))
             return;
 
-        AbyssalPlayerData* data = GetAbyssalData(player);
+        PocketPlayerData* data = GetPocketData(player);
 
         // Prevent infinite recursion: StoreNewItem -> ItemAddedQuestCheck ->
         // CompleteQuest -> OnPlayerBeforeQuestComplete -> StoreNewItem ...
         if (data && data->isMaterializing)
             return;
 
-        uint32 storageId = sAbyssalStorageMgr->GetStorageId(player);
+        uint32 storageId = sPocketStorageMgr->GetStorageId(player);
 
         if (data)
             data->isMaterializing = true;
@@ -295,7 +306,7 @@ private:
                 continue;
 
             uint32 deficit = reqCount - playerCount;
-            uint32 vaultCount = sAbyssalStorageMgr->GetItemCount(storageId, reqItem);
+            uint32 vaultCount = sPocketStorageMgr->GetItemCount(storageId, reqItem);
             if (vaultCount == 0)
                 continue;
 
@@ -305,22 +316,22 @@ private:
             InventoryResult result = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, reqItem, toMaterialize);
             if (result != EQUIP_ERR_OK)
             {
-                ChatHandler(player->GetSession()).SendSysMessage("Abyssal Storage: Not enough bag space to materialize quest items.");
+                ChatHandler(player->GetSession()).SendSysMessage("Pocket Storage: Not enough bag space to materialize quest items.");
                 continue;
             }
 
             // Withdraw before creating the item: with a shared vault another
             // character may have taken the items since we checked the count
-            if (!sAbyssalStorageMgr->WithdrawItem(storageId, reqItem, toMaterialize))
+            if (!sPocketStorageMgr->WithdrawItem(storageId, reqItem, toMaterialize))
                 continue;
 
             Item* newItem = player->StoreNewItem(dest, reqItem, true);
             if (!newItem)
-                sAbyssalStorageMgr->DepositItem(storageId, reqItem, toMaterialize);
+                sPocketStorageMgr->DepositItem(storageId, reqItem, toMaterialize);
             else if (data && trackAsMaterialized)
                 data->materializedItems.insert(newItem->GetGUID().GetCounter());
 
-            sAbyssalStorageMgr->BroadcastItemCount(storageId, reqItem);
+            sPocketStorageMgr->BroadcastItemCount(storageId, reqItem);
         }
 
         if (data)
@@ -332,17 +343,17 @@ private:
 // AllSpellScript — Crafting Materialization
 // ============================================================================
 
-class AbyssalStorageSpellScript : public AllSpellScript
+class PocketStorageSpellScript : public AllSpellScript
 {
 public:
-    AbyssalStorageSpellScript() : AllSpellScript("AbyssalStorageSpellScript", {
+    PocketStorageSpellScript() : AllSpellScript("PocketStorageSpellScript", {
         ALLSPELLHOOK_ON_SPELL_CHECK_CAST,
         ALLSPELLHOOK_ON_CAST
     }) { }
 
     void OnSpellCheckCast(Spell* spell, bool /*strict*/, SpellCastResult& res) override
     {
-        if (!sAbyssalStorageMgr->IsEnabled())
+        if (!sPocketStorageMgr->IsEnabled())
             return;
 
         if (res != SPELL_CAST_OK)
@@ -373,8 +384,8 @@ public:
         if (!hasReagents)
             return;
 
-        uint32 storageId = sAbyssalStorageMgr->GetStorageId(player);
-        AbyssalPlayerData* data = GetAbyssalData(player);
+        uint32 storageId = sPocketStorageMgr->GetStorageId(player);
+        PocketPlayerData* data = GetPocketData(player);
         if (!data)
             return;
 
@@ -391,7 +402,7 @@ public:
                 continue;
 
             uint32 deficit = reagentCount - playerHas;
-            uint32 vaultCount = sAbyssalStorageMgr->GetItemCount(storageId, reagentEntry);
+            uint32 vaultCount = sPocketStorageMgr->GetItemCount(storageId, reagentEntry);
 
             if (vaultCount < deficit)
                 return; // not enough even with vault
@@ -418,29 +429,29 @@ public:
             {
                 data->isMaterializing = false;
                 res = SPELL_FAILED_DONT_REPORT;
-                ChatHandler(player->GetSession()).SendSysMessage("Abyssal Storage: Not enough bag space to materialize crafting reagents.");
+                ChatHandler(player->GetSession()).SendSysMessage("Pocket Storage: Not enough bag space to materialize crafting reagents.");
                 return;
             }
 
             // Withdraw first; if another character emptied the shared vault meanwhile,
             // skip it and let the normal reagent check fail the cast
-            if (!sAbyssalStorageMgr->WithdrawItem(storageId, reagentEntry, deficit))
+            if (!sPocketStorageMgr->WithdrawItem(storageId, reagentEntry, deficit))
                 continue;
 
             Item* newItem = player->StoreNewItem(dest, reagentEntry, true);
             if (!newItem)
-                sAbyssalStorageMgr->DepositItem(storageId, reagentEntry, deficit);
+                sPocketStorageMgr->DepositItem(storageId, reagentEntry, deficit);
             else
                 data->materializedItems.insert(newItem->GetGUID().GetCounter());
 
-            sAbyssalStorageMgr->BroadcastItemCount(storageId, reagentEntry);
+            sPocketStorageMgr->BroadcastItemCount(storageId, reagentEntry);
         }
         data->isMaterializing = false;
     }
 
     void OnSpellCast(Spell* /*spell*/, Unit* caster, SpellInfo const* spellInfo, bool /*skipCheck*/) override
     {
-        if (!sAbyssalStorageMgr->IsEnabled())
+        if (!sPocketStorageMgr->IsEnabled())
             return;
 
         if (!caster || !caster->IsPlayer())
@@ -451,7 +462,7 @@ public:
         if (IsRandomBot(player))
             return;
 
-        AbyssalPlayerData* data = GetAbyssalData(player);
+        PocketPlayerData* data = GetPocketData(player);
         if (!data || data->materializedItems.empty())
             return;
 
@@ -467,7 +478,7 @@ public:
             // Last craft done — fall through to re-vault leftovers
         }
 
-        uint32 storageId = sAbyssalStorageMgr->GetStorageId(player);
+        uint32 storageId = sPocketStorageMgr->GetStorageId(player);
 
         // Re-vault any materialized items that are still in inventory (leftovers)
         data->isMaterializing = true;
@@ -479,8 +490,8 @@ public:
                 uint32 entry = item->GetEntry();
                 uint32 count = item->GetCount();
                 player->DestroyItemCount(entry, count, true);
-                sAbyssalStorageMgr->DepositItem(storageId, entry, count);
-                sAbyssalStorageMgr->BroadcastItemCount(storageId, entry);
+                sPocketStorageMgr->DepositItem(storageId, entry, count);
+                sPocketStorageMgr->BroadcastItemCount(storageId, entry);
             }
         }
         data->materializedItems.clear();
@@ -497,10 +508,10 @@ public:
 
 using namespace Acore::ChatCommands;
 
-class AbyssalStorageCommandScript : public CommandScript
+class PocketStorageCommandScript : public CommandScript
 {
 public:
-    AbyssalStorageCommandScript() : CommandScript("AbyssalStorageCommandScript") { }
+    PocketStorageCommandScript() : CommandScript("PocketStorageCommandScript") { }
 
     ChatCommandTable GetCommands() const override
     {
@@ -519,7 +530,7 @@ public:
             { "keep",   HandleRuleKeepCommand,   SEC_PLAYER, Console::No },
             { "remove", HandleRuleRemoveCommand, SEC_PLAYER, Console::No },
         };
-        static ChatCommandTable absCommandTable =
+        static ChatCommandTable pocketCommandTable =
         {
             { "share",    shareCommandTable },
             { "rule",     ruleCommandTable },
@@ -533,27 +544,27 @@ public:
         };
         static ChatCommandTable commandTable =
         {
-            { "abs",     absCommandTable },
-            { "abyssal", absCommandTable },
+            { "ps",     pocketCommandTable },
+            { "pocket", pocketCommandTable },
         };
         return commandTable;
     }
 
     static bool HandleWithdrawCommand(ChatHandler* handler, uint32 itemEntry, Optional<uint32> optCount)
     {
-        if (!sAbyssalStorageMgr->IsEnabled())
+        if (!sPocketStorageMgr->IsEnabled())
             return false;
 
         Player* player = handler->GetSession()->GetPlayer();
         if (!player)
             return false;
 
-        uint32 storageId = sAbyssalStorageMgr->GetStorageId(player);
-        uint32 vaultCount = sAbyssalStorageMgr->GetItemCount(storageId, itemEntry);
+        uint32 storageId = sPocketStorageMgr->GetStorageId(player);
+        uint32 vaultCount = sPocketStorageMgr->GetItemCount(storageId, itemEntry);
 
         if (vaultCount == 0)
         {
-            handler->SendSysMessage("Abyssal Storage: Item not found in vault.");
+            handler->SendSysMessage("Pocket Storage: Item not found in vault.");
             return true;
         }
 
@@ -564,13 +575,13 @@ public:
         ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(itemEntry);
         if (!itemTemplate)
         {
-            handler->SendSysMessage("Abyssal Storage: Invalid item.");
+            handler->SendSysMessage("Pocket Storage: Invalid item.");
             return true;
         }
 
         // Disable auto-store BEFORE creating items, otherwise OnPlayerStoreNewItem
         // will immediately re-deposit them back into the vault
-        AbyssalPlayerData* data = GetAbyssalData(player);
+        PocketPlayerData* data = GetPocketData(player);
         if (data)
             data->autoStoreEnabled = false;
 
@@ -584,17 +595,17 @@ public:
             InventoryResult result = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, itemEntry, stackSize);
             if (result != EQUIP_ERR_OK)
             {
-                handler->SendSysMessage("Abyssal Storage: Not enough bag space.");
+                handler->SendSysMessage("Pocket Storage: Not enough bag space.");
                 break;
             }
 
             // Withdraw before creating: another character sharing the vault may have taken some
-            if (!sAbyssalStorageMgr->WithdrawItem(storageId, itemEntry, stackSize))
+            if (!sPocketStorageMgr->WithdrawItem(storageId, itemEntry, stackSize))
                 break;
 
             if (!player->StoreNewItem(dest, itemEntry, true))
             {
-                sAbyssalStorageMgr->DepositItem(storageId, itemEntry, stackSize);
+                sPocketStorageMgr->DepositItem(storageId, itemEntry, stackSize);
                 break;
             }
             remaining -= stackSize;
@@ -603,9 +614,9 @@ public:
         uint32 withdrawn = count - remaining;
         if (withdrawn > 0)
         {
-            sAbyssalStorageMgr->BroadcastItemCount(storageId, itemEntry);
+            sPocketStorageMgr->BroadcastItemCount(storageId, itemEntry);
 
-            handler->PSendSysMessage("Abyssal Storage: Withdrew {} x{}.", BuildItemLink(itemEntry), withdrawn);
+            handler->PSendSysMessage("Pocket Storage: Withdrew {} x{}.", BuildItemLink(itemEntry), withdrawn);
         }
 
         return true;
@@ -613,14 +624,14 @@ public:
 
     static bool HandleDepositCommand(ChatHandler* handler)
     {
-        if (!sAbyssalStorageMgr->IsEnabled())
+        if (!sPocketStorageMgr->IsEnabled())
             return false;
 
         Player* player = handler->GetSession()->GetPlayer();
         if (!player)
             return false;
 
-        uint32 storageId = sAbyssalStorageMgr->GetStorageId(player);
+        uint32 storageId = sPocketStorageMgr->GetStorageId(player);
 
         // Collect totals first — DestroyItemCount searches the whole inventory,
         // so destroying during iteration can skip stacks of the same item
@@ -636,7 +647,7 @@ public:
                     if (!item)
                         continue;
 
-                    if (sAbyssalStorageMgr->ShouldAutoStore(player, item->GetTemplate()))
+                    if (sPocketStorageMgr->ShouldAutoStore(player, item->GetTemplate()))
                         toDeposit[item->GetEntry()] += item->GetCount();
                 }
             }
@@ -649,7 +660,7 @@ public:
             if (!item)
                 continue;
 
-            if (sAbyssalStorageMgr->ShouldAutoStore(player, item->GetTemplate()))
+            if (sPocketStorageMgr->ShouldAutoStore(player, item->GetTemplate()))
                 toDeposit[item->GetEntry()] += item->GetCount();
         }
 
@@ -658,24 +669,24 @@ public:
         for (auto const& [entry, count] : toDeposit)
         {
             player->DestroyItemCount(entry, count, true);
-            sAbyssalStorageMgr->DepositItem(storageId, entry, count);
-            sAbyssalStorageMgr->BroadcastItemCount(storageId, entry);
+            sPocketStorageMgr->DepositItem(storageId, entry, count);
+            sPocketStorageMgr->BroadcastItemCount(storageId, entry);
             ++depositedCount;
         }
 
-        AbyssalPlayerData* data = GetAbyssalData(player);
+        PocketPlayerData* data = GetPocketData(player);
         if (data)
             data->autoStoreEnabled = true;
 
-        handler->PSendSysMessage("Abyssal Storage: Deposited {} item stacks.", depositedCount);
+        handler->PSendSysMessage("Pocket Storage: Deposited {} item stacks.", depositedCount);
 
         return true;
     }
 
-    // .abs rule store|keep|remove <itemId> — the addon's Store/Keep lists, saved per account
-    static bool SetItemRule(ChatHandler* handler, uint32 itemEntry, AbyssalItemRule rule)
+    // .ps rule store|keep|remove <itemId> — the addon's Store/Keep lists, saved per account
+    static bool SetItemRule(ChatHandler* handler, uint32 itemEntry, PocketItemRule rule)
     {
-        if (!sAbyssalStorageMgr->IsEnabled())
+        if (!sPocketStorageMgr->IsEnabled())
             return false;
 
         Player* player = handler->GetSession()->GetPlayer();
@@ -685,55 +696,55 @@ public:
         ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(itemEntry);
         if (!itemTemplate)
         {
-            handler->SendSysMessage("Abyssal Storage: Invalid item.");
+            handler->SendSysMessage("Pocket Storage: Invalid item.");
             return true;
         }
 
-        if (rule == AbyssalItemRule::Store && itemTemplate->GetMaxStackSize() <= 1)
+        if (rule == PocketItemRule::Store && itemTemplate->GetMaxStackSize() <= 1)
         {
-            handler->PSendSysMessage("Abyssal Storage: {} does not stack, so it cannot be stored.", BuildItemLink(itemEntry));
+            handler->PSendSysMessage("Pocket Storage: {} does not stack, so it cannot be stored.", BuildItemLink(itemEntry));
             return true;
         }
 
         uint32 accountId = player->GetSession()->GetAccountId();
-        if (rule != AbyssalItemRule::None
-            && sAbyssalStorageMgr->GetItemRule(accountId, itemEntry) == AbyssalItemRule::None
-            && sAbyssalStorageMgr->GetItemRuleCount(accountId) >= ABYSSAL_MAX_ITEM_RULES)
+        if (rule != PocketItemRule::None
+            && sPocketStorageMgr->GetItemRule(accountId, itemEntry) == PocketItemRule::None
+            && sPocketStorageMgr->GetItemRuleCount(accountId) >= POCKET_MAX_ITEM_RULES)
         {
-            handler->PSendSysMessage("Abyssal Storage: Your Store and Keep lists are full ({} items).", ABYSSAL_MAX_ITEM_RULES);
+            handler->PSendSysMessage("Pocket Storage: Your Store and Keep lists are full ({} items).", POCKET_MAX_ITEM_RULES);
             return true;
         }
 
-        sAbyssalStorageMgr->SetItemRule(accountId, itemEntry, rule);
+        sPocketStorageMgr->SetItemRule(accountId, itemEntry, rule);
 
-        if (rule == AbyssalItemRule::Store)
-            handler->PSendSysMessage("Abyssal Storage: {} is now always stored.", BuildItemLink(itemEntry));
-        else if (rule == AbyssalItemRule::Keep)
-            handler->PSendSysMessage("Abyssal Storage: {} is now kept in your bags.", BuildItemLink(itemEntry));
+        if (rule == PocketItemRule::Store)
+            handler->PSendSysMessage("Pocket Storage: {} is now always stored.", BuildItemLink(itemEntry));
+        else if (rule == PocketItemRule::Keep)
+            handler->PSendSysMessage("Pocket Storage: {} is now kept in your bags.", BuildItemLink(itemEntry));
         else
-            handler->PSendSysMessage("Abyssal Storage: Removed {} from your lists.", BuildItemLink(itemEntry));
+            handler->PSendSysMessage("Pocket Storage: Removed {} from your lists.", BuildItemLink(itemEntry));
         return true;
     }
 
     static bool HandleRuleStoreCommand(ChatHandler* handler, uint32 itemEntry)
     {
-        return SetItemRule(handler, itemEntry, AbyssalItemRule::Store);
+        return SetItemRule(handler, itemEntry, PocketItemRule::Store);
     }
 
     static bool HandleRuleKeepCommand(ChatHandler* handler, uint32 itemEntry)
     {
-        return SetItemRule(handler, itemEntry, AbyssalItemRule::Keep);
+        return SetItemRule(handler, itemEntry, PocketItemRule::Keep);
     }
 
     static bool HandleRuleRemoveCommand(ChatHandler* handler, uint32 itemEntry)
     {
-        return SetItemRule(handler, itemEntry, AbyssalItemRule::None);
+        return SetItemRule(handler, itemEntry, PocketItemRule::None);
     }
 
-    // .abs autostore on|off
+    // .ps autostore on|off
     static bool HandleAutoStoreCommand(ChatHandler* handler, std::string state)
     {
-        if (!sAbyssalStorageMgr->IsEnabled())
+        if (!sPocketStorageMgr->IsEnabled())
             return false;
 
         Player* player = handler->GetSession()->GetPlayer();
@@ -750,27 +761,27 @@ public:
             enable = false;
         else
         {
-            handler->SendSysMessage("Abyssal Storage: Use .abs autostore on or .abs autostore off.");
+            handler->SendSysMessage("Pocket Storage: Use .ps autostore on or .ps autostore off.");
             return true;
         }
 
-        sAbyssalStorageMgr->SetAutoStoreOnLoot(player->GetSession()->GetAccountId(), enable);
-        handler->PSendSysMessage("Abyssal Storage: Auto-store on loot is {} for this account.", enable ? "on" : "off");
+        sPocketStorageMgr->SetAutoStoreOnLoot(player->GetSession()->GetAccountId(), enable);
+        handler->PSendSysMessage("Pocket Storage: Auto-store on loot is {} for this account.", enable ? "on" : "off");
         return true;
     }
 
     static bool HandleSyncCommand(ChatHandler* handler)
     {
-        if (!sAbyssalStorageMgr->IsEnabled())
+        if (!sPocketStorageMgr->IsEnabled())
             return false;
 
         Player* player = handler->GetSession()->GetPlayer();
         if (!player)
             return false;
 
-        sAbyssalStorageMgr->SendFullSync(player);
-        sAbyssalStorageMgr->SendAccountSettings(player);
-        handler->SendSysMessage("Abyssal Storage: Sync complete.");
+        sPocketStorageMgr->SendFullSync(player);
+        sPocketStorageMgr->SendAccountSettings(player);
+        handler->SendSysMessage("Pocket Storage: Sync complete.");
         return true;
     }
 
@@ -781,7 +792,7 @@ public:
         return AccountMgr::GetId(name);
     }
 
-    // .abs link <account> <mainAccount>
+    // .ps link <account> <mainAccount>
     // Makes <account> share the vault of <mainAccount>. If <account> owns a vault
     // (including one shared by other accounts), its items and members move along.
     static bool HandleLinkCommand(ChatHandler* handler, std::string accountName, std::string mainAccountName)
@@ -790,22 +801,22 @@ public:
         uint32 mainAccountId = GetAccountIdByName(mainAccountName);
         if (!accountId || !mainAccountId)
         {
-            handler->SendSysMessage("Abyssal Storage: Account not found.");
+            handler->SendSysMessage("Pocket Storage: Account not found.");
             return true;
         }
 
-        uint32 currentStorage = sAbyssalStorageMgr->GetStorageIdForAccount(accountId);
-        uint32 newStorage = sAbyssalStorageMgr->GetStorageIdForAccount(mainAccountId);
+        uint32 currentStorage = sPocketStorageMgr->GetStorageIdForAccount(accountId);
+        uint32 newStorage = sPocketStorageMgr->GetStorageIdForAccount(mainAccountId);
         if (currentStorage == newStorage)
         {
-            handler->SendSysMessage("Abyssal Storage: Those accounts already share a vault.");
+            handler->SendSysMessage("Pocket Storage: Those accounts already share a vault.");
             return true;
         }
 
         // The in-memory vault of online players would go stale, so require everyone to be offline
-        if (sAbyssalStorageMgr->IsAccountLoaded(currentStorage) || sAbyssalStorageMgr->IsAccountLoaded(newStorage))
+        if (sPocketStorageMgr->IsAccountLoaded(currentStorage) || sPocketStorageMgr->IsAccountLoaded(newStorage))
         {
-            handler->SendSysMessage("Abyssal Storage: Log out all characters using either vault first.");
+            handler->SendSysMessage("Pocket Storage: Log out all characters using either vault first.");
             return true;
         }
 
@@ -813,48 +824,48 @@ public:
         if (currentStorage == accountId)
         {
             // The account owns its vault: merge the items and move any accounts linked to it
-            trans->Append("INSERT INTO abyssal_storage (account_id, item_entry, count) "
-                "SELECT {}, src.item_entry, src.count FROM (SELECT item_entry, count FROM abyssal_storage WHERE account_id = {}) AS src "
-                "ON DUPLICATE KEY UPDATE count = abyssal_storage.count + src.count", newStorage, accountId);
-            trans->Append("DELETE FROM abyssal_storage WHERE account_id = {}", accountId);
-            trans->Append("UPDATE abyssal_storage_link SET owner_account_id = {} WHERE owner_account_id = {}", newStorage, accountId);
+            trans->Append("INSERT INTO pocket_storage (account_id, item_entry, count) "
+                "SELECT {}, src.item_entry, src.count FROM (SELECT item_entry, count FROM pocket_storage WHERE account_id = {}) AS src "
+                "ON DUPLICATE KEY UPDATE count = pocket_storage.count + src.count", newStorage, accountId);
+            trans->Append("DELETE FROM pocket_storage WHERE account_id = {}", accountId);
+            trans->Append("UPDATE pocket_storage_link SET owner_account_id = {} WHERE owner_account_id = {}", newStorage, accountId);
         }
         // Otherwise the account was linked elsewhere; the shared items stay with that vault
-        trans->Append("REPLACE INTO abyssal_storage_link (account_id, owner_account_id) VALUES ({}, {})", accountId, newStorage);
+        trans->Append("REPLACE INTO pocket_storage_link (account_id, owner_account_id) VALUES ({}, {})", accountId, newStorage);
         CharacterDatabase.DirectCommitTransaction(trans);
-        sAbyssalStorageMgr->ForgetAccountStorage();
+        sPocketStorageMgr->ForgetAccountStorage();
 
-        handler->PSendSysMessage("Abyssal Storage: Account {} now shares the vault of account {}.", accountName, mainAccountName);
+        handler->PSendSysMessage("Pocket Storage: Account {} now shares the vault of account {}.", accountName, mainAccountName);
         return true;
     }
 
-    // .abs unlink <account>
+    // .ps unlink <account>
     // Gives <account> its own, empty vault again. The shared items stay in the shared vault.
     static bool HandleUnlinkCommand(ChatHandler* handler, std::string accountName)
     {
         uint32 accountId = GetAccountIdByName(accountName);
         if (!accountId)
         {
-            handler->SendSysMessage("Abyssal Storage: Account not found.");
+            handler->SendSysMessage("Pocket Storage: Account not found.");
             return true;
         }
 
-        uint32 currentStorage = sAbyssalStorageMgr->GetStorageIdForAccount(accountId);
+        uint32 currentStorage = sPocketStorageMgr->GetStorageIdForAccount(accountId);
         if (currentStorage == accountId)
         {
-            handler->SendSysMessage("Abyssal Storage: That account is not linked to another vault.");
+            handler->SendSysMessage("Pocket Storage: That account is not linked to another vault.");
             return true;
         }
 
-        if (sAbyssalStorageMgr->IsAccountLoaded(currentStorage))
+        if (sPocketStorageMgr->IsAccountLoaded(currentStorage))
         {
-            handler->SendSysMessage("Abyssal Storage: Log out all characters using that vault first.");
+            handler->SendSysMessage("Pocket Storage: Log out all characters using that vault first.");
             return true;
         }
 
-        CharacterDatabase.DirectExecute("DELETE FROM abyssal_storage_link WHERE account_id = {}", accountId);
-        sAbyssalStorageMgr->ForgetAccountStorage();
-        handler->PSendSysMessage("Abyssal Storage: Account {} has its own vault again.", accountName);
+        CharacterDatabase.DirectExecute("DELETE FROM pocket_storage_link WHERE account_id = {}", accountId);
+        sPocketStorageMgr->ForgetAccountStorage();
+        handler->PSendSysMessage("Pocket Storage: Account {} has its own vault again.", accountName);
         return true;
     }
 
@@ -876,25 +887,25 @@ public:
 
     static bool HasSharedMembers(uint32 accountId)
     {
-        return bool(CharacterDatabase.Query("SELECT 1 FROM abyssal_storage_link WHERE owner_account_id = {} LIMIT 1", accountId));
+        return bool(CharacterDatabase.Query("SELECT 1 FROM pocket_storage_link WHERE owner_account_id = {} LIMIT 1", accountId));
     }
 
-    // Common checks for the .abs share commands; returns the player or nullptr
+    // Common checks for the .ps share commands; returns the player or nullptr
     static Player* GetSharingPlayer(ChatHandler* handler)
     {
-        if (!sAbyssalStorageMgr->IsEnabled())
+        if (!sPocketStorageMgr->IsEnabled())
             return nullptr;
 
-        if (!sAbyssalStorageMgr->IsSharingEnabled())
+        if (!sPocketStorageMgr->IsSharingEnabled())
         {
-            handler->SendSysMessage("Abyssal Storage: Vault sharing is disabled on this server.");
+            handler->SendSysMessage("Pocket Storage: Vault sharing is disabled on this server.");
             return nullptr;
         }
 
         return handler->GetSession()->GetPlayer();
     }
 
-    // .abs share list
+    // .ps share list
     static bool HandleShareListCommand(ChatHandler* handler)
     {
         Player* player = GetSharingPlayer(handler);
@@ -902,21 +913,21 @@ public:
             return true;
 
         uint32 accountId = player->GetSession()->GetAccountId();
-        uint32 owner = sAbyssalStorageMgr->GetStorageIdForAccount(accountId);
+        uint32 owner = sPocketStorageMgr->GetStorageIdForAccount(accountId);
         if (owner != accountId)
         {
-            handler->PSendSysMessage("Abyssal Storage: You share the vault of {}.", GetMainCharacterName(owner));
+            handler->PSendSysMessage("Pocket Storage: You share the vault of {}.", GetMainCharacterName(owner));
             return true;
         }
 
-        QueryResult result = CharacterDatabase.Query("SELECT account_id FROM abyssal_storage_link WHERE owner_account_id = {}", accountId);
+        QueryResult result = CharacterDatabase.Query("SELECT account_id FROM pocket_storage_link WHERE owner_account_id = {}", accountId);
         if (!result)
         {
-            handler->SendSysMessage("Abyssal Storage: Your vault is not shared. Use .abs share invite <character> to share it.");
+            handler->SendSysMessage("Pocket Storage: Your vault is not shared. Use .ps share invite <character> to share it.");
             return true;
         }
 
-        handler->SendSysMessage("Abyssal Storage: Your vault is shared with:");
+        handler->SendSysMessage("Pocket Storage: Your vault is shared with:");
         do
         {
             handler->PSendSysMessage("  {}", GetMainCharacterName(result->Fetch()[0].Get<uint32>()));
@@ -924,7 +935,7 @@ public:
         return true;
     }
 
-    // .abs share invite <character>
+    // .ps share invite <character>
     // Invites the account of <character> to use your vault
     static bool HandleShareInviteCommand(ChatHandler* handler, std::string characterName)
     {
@@ -933,44 +944,44 @@ public:
             return true;
 
         uint32 accountId = player->GetSession()->GetAccountId();
-        if (sAbyssalStorageMgr->GetStorageIdForAccount(accountId) != accountId)
+        if (sPocketStorageMgr->GetStorageIdForAccount(accountId) != accountId)
         {
-            handler->SendSysMessage("Abyssal Storage: You use someone else's vault. Leave it with .abs share leave before inviting others.");
+            handler->SendSysMessage("Pocket Storage: You use someone else's vault. Leave it with .ps share leave before inviting others.");
             return true;
         }
 
         uint32 inviteeId = GetAccountIdByCharacterName(characterName);
         if (!inviteeId)
         {
-            handler->SendSysMessage("Abyssal Storage: Character not found.");
+            handler->SendSysMessage("Pocket Storage: Character not found.");
             return true;
         }
 
         if (inviteeId == accountId)
         {
-            handler->SendSysMessage("Abyssal Storage: That character is on your own account and already uses your vault.");
+            handler->SendSysMessage("Pocket Storage: That character is on your own account and already uses your vault.");
             return true;
         }
 
-        if (sAbyssalStorageMgr->GetStorageIdForAccount(inviteeId) != inviteeId || HasSharedMembers(inviteeId))
+        if (sPocketStorageMgr->GetStorageIdForAccount(inviteeId) != inviteeId || HasSharedMembers(inviteeId))
         {
-            handler->SendSysMessage("Abyssal Storage: That character already shares a vault with someone.");
+            handler->SendSysMessage("Pocket Storage: That character already shares a vault with someone.");
             return true;
         }
 
-        CharacterDatabase.DirectExecute("REPLACE INTO abyssal_storage_invite (invitee_account_id, inviter_account_id, inviter_name) VALUES ({}, {}, '{}')",
+        CharacterDatabase.DirectExecute("REPLACE INTO pocket_storage_invite (invitee_account_id, inviter_account_id, inviter_name) VALUES ({}, {}, '{}')",
             inviteeId, accountId, player->GetName());
 
         normalizePlayerName(characterName);
         if (Player* invitee = ObjectAccessor::FindPlayerByName(characterName))
-            ChatHandler(invitee->GetSession()).PSendSysMessage("Abyssal Storage: {} has invited you to share their vault. Type .abs share accept or .abs share decline.",
+            ChatHandler(invitee->GetSession()).PSendSysMessage("Pocket Storage: {} has invited you to share their vault. Type .ps share accept or .ps share decline.",
                 player->GetName());
 
-        handler->PSendSysMessage("Abyssal Storage: Invited {}. They can accept with .abs share accept.", characterName);
+        handler->PSendSysMessage("Pocket Storage: Invited {}. They can accept with .ps share accept.", characterName);
         return true;
     }
 
-    // .abs share accept
+    // .ps share accept
     // Joins the inviter's vault. Your current vault contents are merged into it.
     static bool HandleShareAcceptCommand(ChatHandler* handler)
     {
@@ -979,10 +990,10 @@ public:
             return true;
 
         uint32 accountId = player->GetSession()->GetAccountId();
-        QueryResult invite = CharacterDatabase.Query("SELECT inviter_account_id, inviter_name FROM abyssal_storage_invite WHERE invitee_account_id = {}", accountId);
+        QueryResult invite = CharacterDatabase.Query("SELECT inviter_account_id, inviter_name FROM pocket_storage_invite WHERE invitee_account_id = {}", accountId);
         if (!invite)
         {
-            handler->SendSysMessage("Abyssal Storage: You have no pending invite.");
+            handler->SendSysMessage("Pocket Storage: You have no pending invite.");
             return true;
         }
 
@@ -990,38 +1001,38 @@ public:
         std::string ownerName = invite->Fetch()[1].Get<std::string>();
 
         // Merging is only safe while this player is the vault's only user
-        if (sAbyssalStorageMgr->GetStorageIdForAccount(accountId) != accountId || HasSharedMembers(accountId))
+        if (sPocketStorageMgr->GetStorageIdForAccount(accountId) != accountId || HasSharedMembers(accountId))
         {
-            handler->SendSysMessage("Abyssal Storage: You already share a vault. Leave it with .abs share leave first.");
+            handler->SendSysMessage("Pocket Storage: You already share a vault. Leave it with .ps share leave first.");
             return true;
         }
 
-        if (sAbyssalStorageMgr->GetStorageIdForAccount(ownerId) != ownerId)
+        if (sPocketStorageMgr->GetStorageIdForAccount(ownerId) != ownerId)
         {
-            CharacterDatabase.DirectExecute("DELETE FROM abyssal_storage_invite WHERE invitee_account_id = {}", accountId);
-            handler->SendSysMessage("Abyssal Storage: The inviter no longer owns a vault. The invite was removed.");
+            CharacterDatabase.DirectExecute("DELETE FROM pocket_storage_invite WHERE invitee_account_id = {}", accountId);
+            handler->SendSysMessage("Pocket Storage: The inviter no longer owns a vault. The invite was removed.");
             return true;
         }
 
         // Queued (not direct) so it runs after any deposits this player still has queued
         CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
-        trans->Append("INSERT INTO abyssal_storage (account_id, item_entry, count) "
-            "SELECT {}, src.item_entry, src.count FROM (SELECT item_entry, count FROM abyssal_storage WHERE account_id = {}) AS src "
-            "ON DUPLICATE KEY UPDATE count = abyssal_storage.count + src.count", ownerId, accountId);
-        trans->Append("DELETE FROM abyssal_storage WHERE account_id = {}", accountId);
-        trans->Append("REPLACE INTO abyssal_storage_link (account_id, owner_account_id) VALUES ({}, {})", accountId, ownerId);
-        trans->Append("DELETE FROM abyssal_storage_invite WHERE invitee_account_id = {}", accountId);
+        trans->Append("INSERT INTO pocket_storage (account_id, item_entry, count) "
+            "SELECT {}, src.item_entry, src.count FROM (SELECT item_entry, count FROM pocket_storage WHERE account_id = {}) AS src "
+            "ON DUPLICATE KEY UPDATE count = pocket_storage.count + src.count", ownerId, accountId);
+        trans->Append("DELETE FROM pocket_storage WHERE account_id = {}", accountId);
+        trans->Append("REPLACE INTO pocket_storage_link (account_id, owner_account_id) VALUES ({}, {})", accountId, ownerId);
+        trans->Append("DELETE FROM pocket_storage_invite WHERE invitee_account_id = {}", accountId);
         CharacterDatabase.CommitTransaction(trans);
 
-        sAbyssalStorageMgr->SwitchAccountStorage(accountId, ownerId, true);
+        sPocketStorageMgr->SwitchAccountStorage(accountId, ownerId, true);
 
-        handler->PSendSysMessage("Abyssal Storage: You now share the vault of {}. Your items were added to it.", ownerName);
+        handler->PSendSysMessage("Pocket Storage: You now share the vault of {}. Your items were added to it.", ownerName);
         if (Player* owner = ObjectAccessor::FindPlayerByName(ownerName))
-            ChatHandler(owner->GetSession()).PSendSysMessage("Abyssal Storage: {} now shares your vault.", player->GetName());
+            ChatHandler(owner->GetSession()).PSendSysMessage("Pocket Storage: {} now shares your vault.", player->GetName());
         return true;
     }
 
-    // .abs share decline
+    // .ps share decline
     static bool HandleShareDeclineCommand(ChatHandler* handler)
     {
         Player* player = GetSharingPlayer(handler);
@@ -1029,18 +1040,18 @@ public:
             return true;
 
         uint32 accountId = player->GetSession()->GetAccountId();
-        if (!CharacterDatabase.Query("SELECT 1 FROM abyssal_storage_invite WHERE invitee_account_id = {}", accountId))
+        if (!CharacterDatabase.Query("SELECT 1 FROM pocket_storage_invite WHERE invitee_account_id = {}", accountId))
         {
-            handler->SendSysMessage("Abyssal Storage: You have no pending invite.");
+            handler->SendSysMessage("Pocket Storage: You have no pending invite.");
             return true;
         }
 
-        CharacterDatabase.DirectExecute("DELETE FROM abyssal_storage_invite WHERE invitee_account_id = {}", accountId);
-        handler->SendSysMessage("Abyssal Storage: Invite declined.");
+        CharacterDatabase.DirectExecute("DELETE FROM pocket_storage_invite WHERE invitee_account_id = {}", accountId);
+        handler->SendSysMessage("Pocket Storage: Invite declined.");
         return true;
     }
 
-    // .abs share leave
+    // .ps share leave
     // Stops using the shared vault. The shared items stay in it; you start with an empty vault.
     static bool HandleShareLeaveCommand(ChatHandler* handler)
     {
@@ -1049,20 +1060,20 @@ public:
             return true;
 
         uint32 accountId = player->GetSession()->GetAccountId();
-        if (sAbyssalStorageMgr->GetStorageIdForAccount(accountId) == accountId)
+        if (sPocketStorageMgr->GetStorageIdForAccount(accountId) == accountId)
         {
-            handler->SendSysMessage("Abyssal Storage: You are not using someone else's vault.");
+            handler->SendSysMessage("Pocket Storage: You are not using someone else's vault.");
             return true;
         }
 
-        CharacterDatabase.DirectExecute("DELETE FROM abyssal_storage_link WHERE account_id = {}", accountId);
-        sAbyssalStorageMgr->SwitchAccountStorage(accountId, accountId, false);
+        CharacterDatabase.DirectExecute("DELETE FROM pocket_storage_link WHERE account_id = {}", accountId);
+        sPocketStorageMgr->SwitchAccountStorage(accountId, accountId, false);
 
-        handler->SendSysMessage("Abyssal Storage: You left the shared vault. The shared items stay with its owner.");
+        handler->SendSysMessage("Pocket Storage: You left the shared vault. The shared items stay with its owner.");
         return true;
     }
 
-    // .abs share kick <character>
+    // .ps share kick <character>
     // Removes the account of <character> from your vault
     static bool HandleShareKickCommand(ChatHandler* handler, std::string characterName)
     {
@@ -1072,26 +1083,26 @@ public:
 
         uint32 accountId = player->GetSession()->GetAccountId();
         uint32 memberId = GetAccountIdByCharacterName(characterName);
-        if (!memberId || memberId == accountId || sAbyssalStorageMgr->GetStorageIdForAccount(memberId) != accountId
-            || sAbyssalStorageMgr->GetStorageIdForAccount(accountId) != accountId)
+        if (!memberId || memberId == accountId || sPocketStorageMgr->GetStorageIdForAccount(memberId) != accountId
+            || sPocketStorageMgr->GetStorageIdForAccount(accountId) != accountId)
         {
-            handler->SendSysMessage("Abyssal Storage: That character does not share your vault.");
+            handler->SendSysMessage("Pocket Storage: That character does not share your vault.");
             return true;
         }
 
-        CharacterDatabase.DirectExecute("DELETE FROM abyssal_storage_link WHERE account_id = {} AND owner_account_id = {}", memberId, accountId);
+        CharacterDatabase.DirectExecute("DELETE FROM pocket_storage_link WHERE account_id = {} AND owner_account_id = {}", memberId, accountId);
         // Moves their online characters to their own (empty) vault right away
-        sAbyssalStorageMgr->SwitchAccountStorage(memberId, memberId, false);
+        sPocketStorageMgr->SwitchAccountStorage(memberId, memberId, false);
 
-        handler->PSendSysMessage("Abyssal Storage: Removed {} from your vault.", characterName);
+        handler->PSendSysMessage("Pocket Storage: Removed {} from your vault.", characterName);
         return true;
     }
 
-    // .abs craft <spellId> [count]
+    // .ps craft <spellId> [count]
     // Materializes reagents from vault and casts the crafting spell
     static bool HandleCraftCommand(ChatHandler* handler, uint32 spellId, Optional<uint32> optCount)
     {
-        if (!sAbyssalStorageMgr->IsEnabled())
+        if (!sPocketStorageMgr->IsEnabled())
             return false;
 
         Player* player = handler->GetSession()->GetPlayer();
@@ -1101,7 +1112,7 @@ public:
         SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellId);
         if (!spellInfo)
         {
-            handler->SendSysMessage("Abyssal Storage: Invalid spell.");
+            handler->SendSysMessage("Pocket Storage: Invalid spell.");
             return true;
         }
 
@@ -1118,11 +1129,11 @@ public:
 
         if (!hasReagents)
         {
-            handler->SendSysMessage("Abyssal Storage: Spell has no reagents.");
+            handler->SendSysMessage("Pocket Storage: Spell has no reagents.");
             return true;
         }
 
-        uint32 storageId = sAbyssalStorageMgr->GetStorageId(player);
+        uint32 storageId = sPocketStorageMgr->GetStorageId(player);
         uint32 craftCount = optCount.value_or(1);
         if (craftCount == 0)
             craftCount = 1;
@@ -1146,11 +1157,11 @@ public:
                 continue;
 
             uint32 playerHas = player->GetItemCount(reagentEntry);
-            uint32 vaultHas = sAbyssalStorageMgr->GetItemCount(storageId, reagentEntry);
+            uint32 vaultHas = sPocketStorageMgr->GetItemCount(storageId, reagentEntry);
 
             if (playerHas + vaultHas < reagentCount)
             {
-                handler->SendSysMessage("Abyssal Storage: Not enough reagents.");
+                handler->SendSysMessage("Pocket Storage: Not enough reagents.");
                 return true;
             }
 
@@ -1190,7 +1201,7 @@ public:
         // Need: 1 slot per vault reagent type + 1 for the crafted product
         if (freeSlots < vaultReagentSlots + 1)
         {
-            handler->SendSysMessage("Abyssal Storage: Not enough bag space (need room for reagents + product).");
+            handler->SendSysMessage("Pocket Storage: Not enough bag space (need room for reagents + product).");
             return true;
         }
 
@@ -1217,13 +1228,13 @@ public:
 
         if (maxCrafts == 0)
         {
-            handler->SendSysMessage("Abyssal Storage: Not enough reagents.");
+            handler->SendSysMessage("Pocket Storage: Not enough reagents.");
             return true;
         }
 
         craftCount = std::min(craftCount, maxCrafts);
 
-        AbyssalPlayerData* data = GetAbyssalData(player);
+        PocketPlayerData* data = GetPocketData(player);
         if (data)
             data->isMaterializing = true;
 
@@ -1245,26 +1256,26 @@ public:
             {
                 if (data)
                     data->isMaterializing = false;
-                handler->SendSysMessage("Abyssal Storage: Not enough bag space for reagents.");
+                handler->SendSysMessage("Pocket Storage: Not enough bag space for reagents.");
                 return true;
             }
 
             // Withdraw before creating: another character sharing the vault may have taken some
-            if (!sAbyssalStorageMgr->WithdrawItem(storageId, r.entry, toWithdraw))
+            if (!sPocketStorageMgr->WithdrawItem(storageId, r.entry, toWithdraw))
             {
                 if (data)
                     data->isMaterializing = false;
-                handler->SendSysMessage("Abyssal Storage: Not enough reagents.");
+                handler->SendSysMessage("Pocket Storage: Not enough reagents.");
                 return true;
             }
 
             Item* newItem = player->StoreNewItem(dest, r.entry, true);
             if (!newItem)
-                sAbyssalStorageMgr->DepositItem(storageId, r.entry, toWithdraw);
+                sPocketStorageMgr->DepositItem(storageId, r.entry, toWithdraw);
             else if (data)
                 data->materializedItems.insert(newItem->GetGUID().GetCounter());
 
-            sAbyssalStorageMgr->BroadcastItemCount(storageId, r.entry);
+            sPocketStorageMgr->BroadcastItemCount(storageId, r.entry);
         }
 
         if (data)
@@ -1286,10 +1297,10 @@ public:
 // Registration
 // ============================================================================
 
-void AddSC_abyssal_storage_scripts()
+void AddSC_pocket_storage_scripts()
 {
-    new AbyssalStorageWorldScript();
-    new AbyssalStoragePlayerScript();
-    new AbyssalStorageSpellScript();
-    new AbyssalStorageCommandScript();
+    new PocketStorageWorldScript();
+    new PocketStoragePlayerScript();
+    new PocketStorageSpellScript();
+    new PocketStorageCommandScript();
 }

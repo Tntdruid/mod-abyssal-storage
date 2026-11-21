@@ -7,6 +7,18 @@ Releases from 1.0.0 on follow [Semantic Versioning](https://semver.org/spec/v2.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-21
+
+### Changed
+- **Breaking:** the module is renamed from Abyssal Storage to Pocket Storage. Module folder `mod-pocket-storage`, config file `mod_pocket_storage.conf` with `PocketStorage.*` keys, tables `pocket_storage*`, addon folder `PocketStorage`, server commands `.ps` / `.pocket` and addon commands `/ps` / `/pocket`. To upgrade:
+  1. Move the module to `modules/mod-pocket-storage` and re-run CMake. The old folder name no longer builds, because AzerothCore derives the module's loader function from it.
+  2. Copy `mod_pocket_storage.conf.dist` to `mod_pocket_storage.conf` and carry over your settings under the new `PocketStorage.*` names.
+  3. Start the server. It renames the existing `abyssal_storage*` tables to `pocket_storage*` once, so no vault data is lost.
+  4. Replace the `AbyssalStorage` addon with the `PocketStorage` folder on every client. The old addon no longer talks to the server.
+
+### Added
+- A chat line such as "Stored [Linen Cloth] x2 (92 in storage)." each time looted items are stored automatically. Turn it off with `PocketStorage.DepositMessage = 0`.
+
 ## [1.0.0] - 2026-11-21
 
 ### Added
@@ -63,5 +75,6 @@ Releases from 1.0.0 on follow [Semantic Versioning](https://semver.org/spec/v2.0
 - Item materialization logic.
 - The "Missing Reagent" error message is no longer shown in the UI.
 
-[Unreleased]: https://github.com/Tntdruid/mod-abyssal-storage/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/Tntdruid/mod-abyssal-storage/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/Tntdruid/mod-abyssal-storage/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/Tntdruid/mod-abyssal-storage/releases/tag/v1.0.0

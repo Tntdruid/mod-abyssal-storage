@@ -1,31 +1,41 @@
 [worldserver]
 
 ###################################################################################################
-#    MOD ABYSSAL STORAGE
+#    MOD POCKET STORAGE
 ###################################################################################################
 
 #
-#    AbyssalStorage.Enable
-#        Description: Enable the Abyssal Storage module.
+#    PocketStorage.Enable
+#        Description: Enable the Pocket Storage module.
 #        Default:     1 (Enabled)
 #                     0 (Disabled)
 #
 
-AbyssalStorage.Enable = 1
+PocketStorage.Enable = 1
 
 #
-#    AbyssalStorage.EnableSharing
+#    PocketStorage.EnableSharing
 #        Description: Let players share one vault between accounts without a GM, using
-#                     .abs share invite/accept/decline/leave/kick. GMs can always link
-#                     accounts with .abs link, whatever this is set to.
+#                     .ps share invite/accept/decline/leave/kick. GMs can always link
+#                     accounts with .ps link, whatever this is set to.
 #        Default:     1 (Enabled)
 #                     0 (Disabled)
 #
 
-AbyssalStorage.EnableSharing = 1
+PocketStorage.EnableSharing = 1
 
 #
-#    AbyssalStorage.ExtraItems
+#    PocketStorage.DepositMessage
+#        Description: Print a chat line such as "Stored [Linen Cloth] x2 (92 in storage)."
+#                     each time looted items are stored automatically.
+#        Default:     1 (Enabled)
+#                     0 (Disabled)
+#
+
+PocketStorage.DepositMessage = 1
+
+#
+#    PocketStorage.ExtraItems
 #        Description: Item ids to store on top of trade goods and gems, separated by
 #                     commas or spaces. Use this for gathered items the game files as
 #                     quest or misc items. While an active quest needs one of these
@@ -34,10 +44,10 @@ AbyssalStorage.EnableSharing = 1
 #        Default:     "4278" (Lesser Bloodstone Ore)
 #
 
-AbyssalStorage.ExtraItems = "4278"
+PocketStorage.ExtraItems = "4278"
 
 #
-#    AbyssalStorage.RandomBotAccountPrefix
+#    PocketStorage.RandomBotAccountPrefix
 #        Description: Accounts whose username starts with this prefix (any case) are random
 #                     playerbots and are ignored by the vault. Leave empty to use
 #                     mod-playerbots' own Playerbots.RandomBotAccountPrefix, or "rndbot"
@@ -46,4 +56,4 @@ AbyssalStorage.ExtraItems = "4278"
 #        Default:     "" (follow mod-playerbots)
 #
 
-AbyssalStorage.RandomBotAccountPrefix = ""
+PocketStorage.RandomBotAccountPrefix = ""

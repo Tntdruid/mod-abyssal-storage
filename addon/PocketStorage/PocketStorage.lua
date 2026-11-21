@@ -1,11 +1,11 @@
--- Abyssal Storage - Core Logic
-AbyssalStorage = AbyssalStorage or {}
-AbyssalStorage.items = {} -- { [itemEntry] = count }
-AbyssalStorage.PREFIX = "ABYS"
+-- Pocket Storage - Core Logic
+PocketStorage = PocketStorage or {}
+PocketStorage.items = {} -- { [itemEntry] = count }
+PocketStorage.PREFIX = "PCKT"
 -- Per-account Store/Keep lists, mirrored from the server
-AbyssalStorage.rules = { store = {}, keep = {} } -- { [itemEntry] = true }
-AbyssalStorage.autoStore = true
-AbyssalStorage.activeRuleTab = "store"
+PocketStorage.rules = { store = {}, keep = {} } -- { [itemEntry] = true }
+PocketStorage.autoStore = true
+PocketStorage.activeRuleTab = "store"
 
 -- ============================================================================
 -- Utility
@@ -36,24 +36,24 @@ timerFrame:SetScript("OnUpdate", function(self, elapsed)
 end)
 timerFrame:Hide()
 
-function AbyssalStorage.SetTimer(delay, callback)
+function PocketStorage.SetTimer(delay, callback)
     table.insert(activeTimers, { remaining = delay, callback = callback })
     timerFrame:Show()
 end
 
-function AbyssalStorage.CancelTimers()
+function PocketStorage.CancelTimers()
     wipe(activeTimers)
     timerFrame:Hide()
 end
 
 -- Extract item entry from an item link: |Hitem:12345:...|h[Name]|h
-function AbyssalStorage:EntryFromLink(link)
+function PocketStorage:EntryFromLink(link)
     if not link then return nil end
     local entry = link:match("item:(%d+)")
     return entry and tonumber(entry) or nil
 end
 
-function AbyssalStorage:GetItemCount(entry)
+function PocketStorage:GetItemCount(entry)
     return self.items[entry] or 0
 end
 
@@ -61,49 +61,49 @@ end
 -- Server Communication
 -- ============================================================================
 
-function AbyssalStorage:SendCommand(cmd)
+function PocketStorage:SendCommand(cmd)
     SendChatMessage("." .. cmd, "SAY")
 end
 
-function AbyssalStorage:Withdraw(entry, count)
-    self:SendCommand("abs withdraw " .. entry .. " " .. (count or 0))
+function PocketStorage:Withdraw(entry, count)
+    self:SendCommand("ps withdraw " .. entry .. " " .. (count or 0))
 end
 
-function AbyssalStorage:Deposit()
-    self:SendCommand("abs deposit")
+function PocketStorage:Deposit()
+    self:SendCommand("ps deposit")
 end
 
-function AbyssalStorage:RequestSync()
-    self:SendCommand("abs sync")
+function PocketStorage:RequestSync()
+    self:SendCommand("ps sync")
 end
 
 -- Accepts an item id, an item link or a number typed as text
-function AbyssalStorage:ToItemEntry(input)
+function PocketStorage:ToItemEntry(input)
     if not input then return nil end
     return tonumber(input) or self:EntryFromLink(tostring(input))
 end
 
-function AbyssalStorage:AddRule(input, listKey)
+function PocketStorage:AddRule(input, listKey)
     local entry = self:ToItemEntry(input)
     if not entry then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffff4444Abyssal Storage: Drop an item, shift-click a link or type an item ID.|r")
+        DEFAULT_CHAT_FRAME:AddMessage("|cffff4444Pocket Storage: Drop an item, shift-click a link or type an item ID.|r")
         return
     end
-    self:SendCommand("abs rule " .. (listKey == "keep" and "keep " or "store ") .. entry)
+    self:SendCommand("ps rule " .. (listKey == "keep" and "keep " or "store ") .. entry)
 end
 
-function AbyssalStorage:RemoveRule(entry)
+function PocketStorage:RemoveRule(entry)
     if entry then
-        self:SendCommand("abs rule remove " .. entry)
+        self:SendCommand("ps rule remove " .. entry)
     end
 end
 
-function AbyssalStorage:SetAutoStore(enabled)
-    self:SendCommand("abs autostore " .. (enabled and "on" or "off"))
+function PocketStorage:SetAutoStore(enabled)
+    self:SendCommand("ps autostore " .. (enabled and "on" or "off"))
 end
 
 local function RefreshRules()
-    if AbyssalStorage.UpdateRulesUI then AbyssalStorage:UpdateRulesUI() end
+    if PocketStorage.UpdateRulesUI then PocketStorage:UpdateRulesUI() end
 end
 
 -- ============================================================================
@@ -111,7 +111,7 @@ end
 -- ============================================================================
 
 -- msg is the body (arg2 from CHAT_MSG_ADDON), e.g. "SYNC:entry,count;..."
-function AbyssalStorage:HandleMessage(msg)
+function PocketStorage:HandleMessage(msg)
     if not msg then return end
 
     local cmd = msg:match("^(%u+):")
@@ -138,7 +138,7 @@ function AbyssalStorage:HandleMessage(msg)
 end
 
 -- RULES:BEGIN, RULES:S:<id,id,...>, RULES:K:<id,id,...>, RULES:END
-function AbyssalStorage:HandleRules(payload)
+function PocketStorage:HandleRules(payload)
     if payload == "BEGIN" then
         self._pendingRules = { store = {}, keep = {} }
         return
@@ -164,7 +164,7 @@ function AbyssalStorage:HandleRules(payload)
 end
 
 -- RULE:<S|K|N>:<id>, N = removed. An item is on one list at most.
-function AbyssalStorage:HandleRule(payload)
+function PocketStorage:HandleRule(payload)
     local kind, id = (payload or ""):match("^([SKN]):(%d+)$")
     if not kind then return end
 
@@ -179,7 +179,7 @@ function AbyssalStorage:HandleRule(payload)
     RefreshRules()
 end
 
-function AbyssalStorage:HandleSync(payload)
+function PocketStorage:HandleSync(payload)
     if not payload or payload == "" then
         self.items = {}
         if self.UpdateUI then self:UpdateUI() end
@@ -202,14 +202,14 @@ function AbyssalStorage:HandleSync(payload)
     end
 
     -- Debounce UI update for multi-packet syncs
-    AbyssalStorage.CancelTimers()
-    AbyssalStorage.SetTimer(0.1, function()
-        AbyssalStorage._syncActive = false
-        if AbyssalStorage.UpdateUI then AbyssalStorage:UpdateUI() end
+    PocketStorage.CancelTimers()
+    PocketStorage.SetTimer(0.1, function()
+        PocketStorage._syncActive = false
+        if PocketStorage.UpdateUI then PocketStorage:UpdateUI() end
     end)
 end
 
-function AbyssalStorage:HandleUpdate(payload)
+function PocketStorage:HandleUpdate(payload)
     if not payload then return end
     local entry, count = payload:match("(%d+),(%d+)")
     if entry and count then
@@ -225,7 +225,7 @@ function AbyssalStorage:HandleUpdate(payload)
     end
 end
 
-function AbyssalStorage:HandleDelete(payload)
+function PocketStorage:HandleDelete(payload)
     if not payload then return end
     local entry = tonumber(payload)
     if entry then
@@ -234,9 +234,9 @@ function AbyssalStorage:HandleDelete(payload)
     end
 end
 
-function AbyssalStorage:HandleError(payload)
+function PocketStorage:HandleError(payload)
     if payload then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffff4444Abyssal Storage: " .. payload .. "|r")
+        DEFAULT_CHAT_FRAME:AddMessage("|cffff4444Pocket Storage: " .. payload .. "|r")
     end
 end
 
@@ -245,21 +245,21 @@ end
 -- ============================================================================
 
 if RegisterAddonMessagePrefix then
-    RegisterAddonMessagePrefix(AbyssalStorage.PREFIX)
+    RegisterAddonMessagePrefix(PocketStorage.PREFIX)
 end
 
-local eventFrame = CreateFrame("Frame", "AbyssalStorageEventFrame", UIParent)
+local eventFrame = CreateFrame("Frame", "PocketStorageEventFrame", UIParent)
 eventFrame:RegisterEvent("CHAT_MSG_ADDON")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
 
 eventFrame:SetScript("OnEvent", function(self, event, arg1, arg2, ...)
     if event == "CHAT_MSG_ADDON" then
-        -- arg1 = prefix ("ABYS"), arg2 = message body
-        if arg1 == AbyssalStorage.PREFIX then
-            AbyssalStorage:HandleMessage(arg2)
+        -- arg1 = prefix ("PCKT"), arg2 = message body
+        if arg1 == PocketStorage.PREFIX then
+            PocketStorage:HandleMessage(arg2)
         end
     elseif event == "PLAYER_LOGIN" then
-        AbyssalStorage:RequestSync()
+        PocketStorage:RequestSync()
     end
 end)
 
@@ -267,7 +267,7 @@ end)
 -- Item Tooltips — show the vault count on every item tooltip
 -- ============================================================================
 
-local VAULT_LINE = "Abyssal Storage"
+local VAULT_LINE = "Pocket Storage"
 
 -- OnTooltipSetItem can fire more than once per tooltip (e.g. recipes), so look
 -- for our line instead of keeping a flag that other addons' tooltip use can leave stale
@@ -287,13 +287,13 @@ local function AddVaultLine(tooltip)
 
     -- The vault grid adds its own Bags/Storage/Total lines
     local owner = tooltip:GetOwner()
-    if owner and owner.isAbyssalCell then return end
+    if owner and owner.isPocketCell then return end
 
     local _, link = tooltip:GetItem()
-    local entry = AbyssalStorage:EntryFromLink(link)
+    local entry = PocketStorage:EntryFromLink(link)
     if not entry then return end
 
-    local count = AbyssalStorage:GetItemCount(entry)
+    local count = PocketStorage:GetItemCount(entry)
     if count > 0 then
         tooltip:AddDoubleLine(VAULT_LINE, tostring(count), 0.78, 0.82, 0.88, 0.2, 1, 0.6)
         tooltip:Show()
@@ -308,42 +308,42 @@ end
 -- Slash Commands
 -- ============================================================================
 
-SLASH_ABYSSAL1 = "/abs"
-SLASH_ABYSSAL2 = "/abyssal"
-SlashCmdList["ABYSSAL"] = function(msg)
+SLASH_POCKETSTORAGE1 = "/ps"
+SLASH_POCKETSTORAGE2 = "/pocket"
+SlashCmdList["POCKETSTORAGE"] = function(msg)
     if msg == "" or msg == "show" then
-        if AbyssalStorageFrame then
-            if AbyssalStorageFrame:IsShown() then
-                AbyssalStorageFrame:Hide()
+        if PocketStorageFrame then
+            if PocketStorageFrame:IsShown() then
+                PocketStorageFrame:Hide()
             else
-                AbyssalStorageFrame:Show()
-                if AbyssalStorage.UpdateUI then
-                    AbyssalStorage:UpdateUI()
+                PocketStorageFrame:Show()
+                if PocketStorage.UpdateUI then
+                    PocketStorage:UpdateUI()
                 end
             end
         end
     elseif msg == "deposit" then
-        AbyssalStorage:Deposit()
+        PocketStorage:Deposit()
     elseif msg == "sync" then
-        AbyssalStorage:RequestSync()
+        PocketStorage:RequestSync()
     elseif msg == "rules" then
-        if AbyssalStorage.ToggleRulesUI then AbyssalStorage:ToggleRulesUI() end
+        if PocketStorage.ToggleRulesUI then PocketStorage:ToggleRulesUI() end
     else
         local cmd, rest = msg:match("^(%S+)%s*(.*)")
         if cmd == "withdraw" then
             local entry, count = rest:match("(%d+)%s*(%d*)")
             if entry then
-                AbyssalStorage:Withdraw(tonumber(entry), tonumber(count) or 0)
+                PocketStorage:Withdraw(tonumber(entry), tonumber(count) or 0)
             else
-                DEFAULT_CHAT_FRAME:AddMessage("|cffff4444Usage: /abs withdraw <itemEntry> [count]|r")
+                DEFAULT_CHAT_FRAME:AddMessage("|cffff4444Usage: /ps withdraw <itemEntry> [count]|r")
             end
         else
-            DEFAULT_CHAT_FRAME:AddMessage("|cff00ccffAbyssal Storage Commands:|r")
-            DEFAULT_CHAT_FRAME:AddMessage("  /abs - Toggle storage window")
-            DEFAULT_CHAT_FRAME:AddMessage("  /abs deposit - Deposit all trade goods")
-            DEFAULT_CHAT_FRAME:AddMessage("  /abs sync - Re-sync from server")
-            DEFAULT_CHAT_FRAME:AddMessage("  /abs rules - Edit the Store and Keep lists")
-            DEFAULT_CHAT_FRAME:AddMessage("  /abs withdraw <id> [count] - Withdraw items")
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ccffPocket Storage Commands:|r")
+            DEFAULT_CHAT_FRAME:AddMessage("  /ps - Toggle storage window")
+            DEFAULT_CHAT_FRAME:AddMessage("  /ps deposit - Deposit all trade goods")
+            DEFAULT_CHAT_FRAME:AddMessage("  /ps sync - Re-sync from server")
+            DEFAULT_CHAT_FRAME:AddMessage("  /ps rules - Edit the Store and Keep lists")
+            DEFAULT_CHAT_FRAME:AddMessage("  /ps withdraw <id> [count] - Withdraw items")
         end
     end
 end
