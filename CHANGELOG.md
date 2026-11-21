@@ -3,9 +3,11 @@
 All notable changes to this module are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-The project has no version tags yet, so entries are grouped by date.
+Releases from 1.0.0 on follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html); older entries are grouped by date.
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-11-21
 
 ### Added
 - `AbyssalStorage.ExtraItems` stores extra items by id, on top of trade goods and gems. It defaults to Lesser Bloodstone Ore (4278), which the game files as a quest item.
@@ -14,6 +16,7 @@ The project has no version tags yet, so entries are grouped by date.
 - Vault changes show up right away in the addon for every online character sharing the vault.
 - Item tooltips everywhere (bags, chat links, loot, auction house, professions) show an "Abyssal Storage" line with the vault count. Update the addon to get it.
 - Accepting a quest pulls the items it needs out of the vault (e.g. Murloc Fins), so the quest counts them right away.
+- Store and Keep lists per account, edited from a new rules window in the addon (`/abs rules` or the **Rules** button): Store vaults any stackable item, Keep never vaults an item. The window also turns auto-store on loot off for the account. Run `data/sql/db-characters/abyssal_storage_rule.sql` to create the new tables, and update the addon.
 
 ### Fixed
 - Logging out one character no longer drops the vault from memory while other characters using it are still online.
@@ -59,3 +62,6 @@ The project has no version tags yet, so entries are grouped by date.
 - "Create All" now crafts at most one full stack.
 - Item materialization logic.
 - The "Missing Reagent" error message is no longer shown in the UI.
+
+[Unreleased]: https://github.com/Tntdruid/mod-abyssal-storage/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Tntdruid/mod-abyssal-storage/releases/tag/v1.0.0

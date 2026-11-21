@@ -123,6 +123,22 @@ depositBtn:SetScript("OnClick", function()
     AbyssalStorage:Deposit()
 end)
 
+-- Rules button — opens the Store/Keep lists
+local rulesBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+rulesBtn:SetSize(60, 22)
+rulesBtn:SetPoint("RIGHT", depositBtn, "LEFT", -4, 0)
+rulesBtn:SetText("Rules")
+rulesBtn:SetNormalTexture("Interface\\Buttons\\WHITE8X8")
+rulesBtn:SetPushedTexture("Interface\\Buttons\\WHITE8X8")
+rulesBtn:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
+rulesBtn:GetNormalTexture():SetVertexColor(0.12, 0.12, 0.12, 0.9)
+rulesBtn:GetPushedTexture():SetVertexColor(0.18, 0.18, 0.18, 1)
+rulesBtn:GetHighlightTexture():SetVertexColor(0.25, 0.25, 0.25, 0.9)
+rulesBtn:GetFontString():SetTextColor(1, 0.85, 0)
+rulesBtn:SetScript("OnClick", function()
+    AbyssalStorage:ToggleRulesUI()
+end)
+
 -- ============================================================================
 -- Search Bar
 -- ============================================================================

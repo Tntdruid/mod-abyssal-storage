@@ -36,6 +36,17 @@ struct AbyssalPlayerData : public DataMap::Base
 
 AbyssalPlayerData* GetAbyssalData(Player* player);
 
+// Per-account item rule, set from the addon's Store/Keep lists
+enum class AbyssalItemRule : uint8
+{
+    None  = 0,
+    Store = 1, // always vault the item, whatever its class
+    Keep  = 2  // never vault the item
+};
+
+// Upper bound on Store + Keep rules per account
+constexpr std::size_t ABYSSAL_MAX_ITEM_RULES = 500;
+
 class AbyssalStorageMgr
 {
 public:
@@ -70,6 +81,16 @@ public:
     bool IsItemRequiredByActiveQuest(Player* player, uint32 itemId);
     uint32 GetQuestReservedCount(Player* player, uint32 itemId);
 
+    // Store/Keep rules and the auto-store switch belong to the player's own account,
+    // not the shared vault. Loaded while a character of the account is online.
+    AbyssalItemRule GetItemRule(uint32 accountId, uint32 itemEntry);
+    std::size_t GetItemRuleCount(uint32 accountId);
+    // Saves the rule and updates the addon of every online character on the account
+    void SetItemRule(uint32 accountId, uint32 itemEntry, AbyssalItemRule rule);
+    bool IsAutoStoreOnLoot(uint32 accountId);
+    void SetAutoStoreOnLoot(uint32 accountId, bool enabled);
+    void SendAccountSettings(Player* player);
+
     // Messaging helpers
     void SendAddonMessage(Player* player, std::string const& message);
     void SendFullSync(Player* player);
@@ -89,7 +110,16 @@ public:
 private:
     AbyssalStorageMgr() = default;
 
+    struct AccountSettings
+    {
+        std::unordered_map<uint32, AbyssalItemRule> rules; // itemEntry -> rule
+        bool autoStoreOnLoot = true;
+    };
+
     std::unordered_map<uint32, uint32> QueryStorageItems(uint32 storageId);
+    AccountSettings QueryAccountSettings(uint32 accountId);
+    // Send a message to every online character of the account
+    void SendToAccount(uint32 accountId, std::string const& message);
 
     // storageId -> (itemEntry -> count)
     std::unordered_map<uint32, std::unordered_map<uint32, uint32>> _storage;
@@ -97,6 +127,8 @@ private:
     std::unordered_map<uint32, std::map<ObjectGuid, uint32>> _members;
     // accountId -> storageId
     std::unordered_map<uint32, uint32> _accountStorage;
+    // accountId -> Store/Keep rules and settings, for accounts with a character online
+    std::unordered_map<uint32, AccountSettings> _accountSettings;
     std::unordered_set<uint32> _extraItems;
     std::mutex _storageMutex;
     bool _enabled = true;

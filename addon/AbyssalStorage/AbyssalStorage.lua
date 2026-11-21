@@ -2,6 +2,10 @@
 AbyssalStorage = AbyssalStorage or {}
 AbyssalStorage.items = {} -- { [itemEntry] = count }
 AbyssalStorage.PREFIX = "ABYS"
+-- Per-account Store/Keep lists, mirrored from the server
+AbyssalStorage.rules = { store = {}, keep = {} } -- { [itemEntry] = true }
+AbyssalStorage.autoStore = true
+AbyssalStorage.activeRuleTab = "store"
 
 -- ============================================================================
 -- Utility
@@ -73,6 +77,35 @@ function AbyssalStorage:RequestSync()
     self:SendCommand("abs sync")
 end
 
+-- Accepts an item id, an item link or a number typed as text
+function AbyssalStorage:ToItemEntry(input)
+    if not input then return nil end
+    return tonumber(input) or self:EntryFromLink(tostring(input))
+end
+
+function AbyssalStorage:AddRule(input, listKey)
+    local entry = self:ToItemEntry(input)
+    if not entry then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffff4444Abyssal Storage: Drop an item, shift-click a link or type an item ID.|r")
+        return
+    end
+    self:SendCommand("abs rule " .. (listKey == "keep" and "keep " or "store ") .. entry)
+end
+
+function AbyssalStorage:RemoveRule(entry)
+    if entry then
+        self:SendCommand("abs rule remove " .. entry)
+    end
+end
+
+function AbyssalStorage:SetAutoStore(enabled)
+    self:SendCommand("abs autostore " .. (enabled and "on" or "off"))
+end
+
+local function RefreshRules()
+    if AbyssalStorage.UpdateRulesUI then AbyssalStorage:UpdateRulesUI() end
+end
+
 -- ============================================================================
 -- Message Parsing
 -- ============================================================================
@@ -94,7 +127,56 @@ function AbyssalStorage:HandleMessage(msg)
         self:HandleDelete(payload)
     elseif cmd == "ERR" then
         self:HandleError(payload)
+    elseif cmd == "RULES" then
+        self:HandleRules(payload)
+    elseif cmd == "RULE" then
+        self:HandleRule(payload)
+    elseif cmd == "AUTO" then
+        self.autoStore = payload == "1"
+        RefreshRules()
     end
+end
+
+-- RULES:BEGIN, RULES:S:<id,id,...>, RULES:K:<id,id,...>, RULES:END
+function AbyssalStorage:HandleRules(payload)
+    if payload == "BEGIN" then
+        self._pendingRules = { store = {}, keep = {} }
+        return
+    end
+
+    local pending = self._pendingRules
+    if not pending then return end
+
+    if payload == "END" then
+        self.rules = pending
+        self._pendingRules = nil
+        RefreshRules()
+        return
+    end
+
+    local kind, ids = payload:match("^([SK]):(.+)$")
+    if kind then
+        local target = kind == "S" and pending.store or pending.keep
+        for id in ids:gmatch("%d+") do
+            target[tonumber(id)] = true
+        end
+    end
+end
+
+-- RULE:<S|K|N>:<id>, N = removed. An item is on one list at most.
+function AbyssalStorage:HandleRule(payload)
+    local kind, id = (payload or ""):match("^([SKN]):(%d+)$")
+    if not kind then return end
+
+    id = tonumber(id)
+    self.rules.store[id] = nil
+    self.rules.keep[id] = nil
+    if kind == "S" then
+        self.rules.store[id] = true
+    elseif kind == "K" then
+        self.rules.keep[id] = true
+    end
+    RefreshRules()
 end
 
 function AbyssalStorage:HandleSync(payload)
@@ -244,6 +326,8 @@ SlashCmdList["ABYSSAL"] = function(msg)
         AbyssalStorage:Deposit()
     elseif msg == "sync" then
         AbyssalStorage:RequestSync()
+    elseif msg == "rules" then
+        if AbyssalStorage.ToggleRulesUI then AbyssalStorage:ToggleRulesUI() end
     else
         local cmd, rest = msg:match("^(%S+)%s*(.*)")
         if cmd == "withdraw" then
@@ -258,6 +342,7 @@ SlashCmdList["ABYSSAL"] = function(msg)
             DEFAULT_CHAT_FRAME:AddMessage("  /abs - Toggle storage window")
             DEFAULT_CHAT_FRAME:AddMessage("  /abs deposit - Deposit all trade goods")
             DEFAULT_CHAT_FRAME:AddMessage("  /abs sync - Re-sync from server")
+            DEFAULT_CHAT_FRAME:AddMessage("  /abs rules - Edit the Store and Keep lists")
             DEFAULT_CHAT_FRAME:AddMessage("  /abs withdraw <id> [count] - Withdraw items")
         end
     end

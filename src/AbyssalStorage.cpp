@@ -80,27 +80,61 @@ std::unordered_map<uint32, uint32> AbyssalStorageMgr::QueryStorageItems(uint32 s
     return items;
 }
 
+AbyssalStorageMgr::AccountSettings AbyssalStorageMgr::QueryAccountSettings(uint32 accountId)
+{
+    AccountSettings settings;
+
+    if (QueryResult result = CharacterDatabase.Query("SELECT item_entry, rule FROM abyssal_storage_rule WHERE account_id = {}", accountId))
+    {
+        do
+        {
+            Field* fields = result->Fetch();
+            uint8 rule = fields[1].Get<uint8>();
+            if (rule == uint8(AbyssalItemRule::Store) || rule == uint8(AbyssalItemRule::Keep))
+                settings.rules[fields[0].Get<uint32>()] = AbyssalItemRule(rule);
+        } while (result->NextRow());
+    }
+
+    if (QueryResult result = CharacterDatabase.Query("SELECT auto_store FROM abyssal_storage_settings WHERE account_id = {}", accountId))
+        settings.autoStoreOnLoot = result->Fetch()[0].Get<uint8>() != 0;
+
+    return settings;
+}
+
 void AbyssalStorageMgr::LoadAccountData(Player* player)
 {
     uint32 accountId = player->GetSession()->GetAccountId();
     uint32 storageId = GetStorageIdForAccount(accountId);
 
+    bool storageLoaded;
+    bool settingsLoaded;
     {
         std::lock_guard<std::mutex> lock(_storageMutex);
         _members[storageId][player->GetGUID()] = accountId;
-        if (_storage.find(storageId) != _storage.end())
-            return; // already loaded
+        storageLoaded = _storage.find(storageId) != _storage.end();
+        settingsLoaded = _accountSettings.find(accountId) != _accountSettings.end();
     }
 
-    auto items = QueryStorageItems(storageId);
+    // DB queries run outside the lock; another player on the same vault or account
+    // may load the same data meanwhile, and emplace keeps whichever came first
+    if (!storageLoaded)
+    {
+        auto items = QueryStorageItems(storageId);
+        std::lock_guard<std::mutex> lock(_storageMutex);
+        _storage.emplace(storageId, std::move(items));
+    }
 
-    std::lock_guard<std::mutex> lock(_storageMutex);
-    // Another player on the same vault may have loaded it while we queried
-    _storage.emplace(storageId, std::move(items));
+    if (!settingsLoaded)
+    {
+        AccountSettings settings = QueryAccountSettings(accountId);
+        std::lock_guard<std::mutex> lock(_storageMutex);
+        _accountSettings.emplace(accountId, std::move(settings));
+    }
 }
 
 void AbyssalStorageMgr::UnloadAccountData(Player* player)
 {
+    uint32 accountId = player->GetSession()->GetAccountId();
     uint32 storageId = GetStorageId(player);
 
     std::lock_guard<std::mutex> lock(_storageMutex);
@@ -109,12 +143,21 @@ void AbyssalStorageMgr::UnloadAccountData(Player* player)
     if (it != _members.end())
     {
         it->second.erase(player->GetGUID());
-        if (!it->second.empty())
-            return; // still in use by other players sharing this vault
-        _members.erase(it);
+        if (it->second.empty())
+            _members.erase(it);
     }
 
-    _storage.erase(storageId);
+    // Keep the vault while other players sharing it are online
+    if (_members.find(storageId) == _members.end())
+        _storage.erase(storageId);
+
+    // Keep the account's rules while another of its characters is online
+    for (auto const& [id, members] : _members)
+        for (auto const& [guid, memberAccountId] : members)
+            if (memberAccountId == accountId)
+                return;
+
+    _accountSettings.erase(accountId);
 }
 
 bool AbyssalStorageMgr::IsAccountLoaded(uint32 storageId)
@@ -318,18 +361,152 @@ bool AbyssalStorageMgr::ShouldAutoStore(Player* player, ItemTemplate const* item
     if (!itemTemplate)
         return false;
 
-    if (itemTemplate->Class != ITEM_CLASS_TRADE_GOODS && itemTemplate->Class != ITEM_CLASS_GEM
-        && _extraItems.find(itemTemplate->ItemId) == _extraItems.end())
+    AbyssalItemRule rule = GetItemRule(player->GetSession()->GetAccountId(), itemTemplate->ItemId);
+    if (rule == AbyssalItemRule::Keep)
         return false;
 
-    // Profession tools (runed enchanting rods, etc.) must stay in bags to satisfy spell totem requirements
-    if (itemTemplate->TotemCategory)
-        return false;
+    // The vault keeps only entry and count, so a Store rule never applies to unstackable
+    // items, whose enchants, gems and durability would be lost
+    if (rule != AbyssalItemRule::Store || itemTemplate->GetMaxStackSize() <= 1)
+    {
+        if (itemTemplate->Class != ITEM_CLASS_TRADE_GOODS && itemTemplate->Class != ITEM_CLASS_GEM
+            && _extraItems.find(itemTemplate->ItemId) == _extraItems.end())
+            return false;
+
+        // Profession tools (runed enchanting rods, etc.) must stay in bags to satisfy spell totem requirements
+        if (itemTemplate->TotemCategory)
+            return false;
+    }
 
     if (IsItemRequiredByActiveQuest(player, itemTemplate->ItemId))
         return false;
 
     return true;
+}
+
+AbyssalItemRule AbyssalStorageMgr::GetItemRule(uint32 accountId, uint32 itemEntry)
+{
+    std::lock_guard<std::mutex> lock(_storageMutex);
+
+    auto accIt = _accountSettings.find(accountId);
+    if (accIt == _accountSettings.end())
+        return AbyssalItemRule::None;
+
+    auto ruleIt = accIt->second.rules.find(itemEntry);
+    return ruleIt == accIt->second.rules.end() ? AbyssalItemRule::None : ruleIt->second;
+}
+
+std::size_t AbyssalStorageMgr::GetItemRuleCount(uint32 accountId)
+{
+    std::lock_guard<std::mutex> lock(_storageMutex);
+
+    auto accIt = _accountSettings.find(accountId);
+    return accIt == _accountSettings.end() ? 0 : accIt->second.rules.size();
+}
+
+void AbyssalStorageMgr::SetItemRule(uint32 accountId, uint32 itemEntry, AbyssalItemRule rule)
+{
+    {
+        std::lock_guard<std::mutex> lock(_storageMutex);
+        auto& rules = _accountSettings[accountId].rules;
+        if (rule == AbyssalItemRule::None)
+            rules.erase(itemEntry);
+        else
+            rules[itemEntry] = rule;
+    }
+
+    if (rule == AbyssalItemRule::None)
+        CharacterDatabase.Execute("DELETE FROM abyssal_storage_rule WHERE account_id = {} AND item_entry = {}", accountId, itemEntry);
+    else
+        CharacterDatabase.Execute("REPLACE INTO abyssal_storage_rule (account_id, item_entry, rule) VALUES ({}, {}, {})",
+            accountId, itemEntry, uint32(rule)); // uint8 would be formatted as a character
+
+    char const* code = rule == AbyssalItemRule::Store ? "S" : rule == AbyssalItemRule::Keep ? "K" : "N";
+    SendToAccount(accountId, std::string("RULE:") + code + ":" + std::to_string(itemEntry));
+}
+
+bool AbyssalStorageMgr::IsAutoStoreOnLoot(uint32 accountId)
+{
+    std::lock_guard<std::mutex> lock(_storageMutex);
+
+    auto accIt = _accountSettings.find(accountId);
+    return accIt == _accountSettings.end() || accIt->second.autoStoreOnLoot;
+}
+
+void AbyssalStorageMgr::SetAutoStoreOnLoot(uint32 accountId, bool enabled)
+{
+    {
+        std::lock_guard<std::mutex> lock(_storageMutex);
+        _accountSettings[accountId].autoStoreOnLoot = enabled;
+    }
+
+    CharacterDatabase.Execute("REPLACE INTO abyssal_storage_settings (account_id, auto_store) VALUES ({}, {})",
+        accountId, enabled ? 1 : 0);
+
+    SendToAccount(accountId, std::string("AUTO:") + (enabled ? "1" : "0"));
+}
+
+void AbyssalStorageMgr::SendToAccount(uint32 accountId, std::string const& message)
+{
+    std::vector<ObjectGuid> members;
+    {
+        std::lock_guard<std::mutex> lock(_storageMutex);
+        for (auto const& [storageId, storageMembers] : _members)
+            for (auto const& [guid, memberAccountId] : storageMembers)
+                if (memberAccountId == accountId)
+                    members.push_back(guid);
+    }
+
+    for (ObjectGuid const& guid : members)
+        if (Player* member = ObjectAccessor::FindConnectedPlayer(guid))
+            SendAddonMessage(member, message);
+}
+
+// RULES:BEGIN, then the ids in short RULES:S:/RULES:K: lines, then RULES:END and AUTO:<0|1>.
+// The lines are built here, since SendAddonMessage only knows how to split SYNC-style lists.
+void AbyssalStorageMgr::SendAccountSettings(Player* player)
+{
+    uint32 accountId = player->GetSession()->GetAccountId();
+
+    std::vector<uint32> store;
+    std::vector<uint32> keep;
+    bool autoStore = true;
+    {
+        std::lock_guard<std::mutex> lock(_storageMutex);
+        auto accIt = _accountSettings.find(accountId);
+        if (accIt != _accountSettings.end())
+        {
+            for (auto const& [entry, rule] : accIt->second.rules)
+                (rule == AbyssalItemRule::Store ? store : keep).push_back(entry);
+            autoStore = accIt->second.autoStoreOnLoot;
+        }
+    }
+
+    SendAddonMessage(player, "RULES:BEGIN");
+
+    auto sendList = [&](char const* prefix, std::vector<uint32> const& ids)
+    {
+        std::string line;
+        for (uint32 id : ids)
+        {
+            std::string idText = std::to_string(id);
+            if (!line.empty() && line.length() + 1 + idText.length() > 180)
+            {
+                SendAddonMessage(player, prefix + line);
+                line.clear();
+            }
+            if (!line.empty())
+                line += ",";
+            line += idText;
+        }
+        if (!line.empty())
+            SendAddonMessage(player, prefix + line);
+    };
+    sendList("RULES:S:", store);
+    sendList("RULES:K:", keep);
+
+    SendAddonMessage(player, "RULES:END");
+    SendAddonMessage(player, std::string("AUTO:") + (autoStore ? "1" : "0"));
 }
 
 // Send a raw LANG_ADDON packet. The WoW 3.3.5 client splits on '\t':

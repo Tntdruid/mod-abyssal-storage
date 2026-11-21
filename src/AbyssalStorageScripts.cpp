@@ -127,6 +127,7 @@ public:
 
         sAbyssalStorageMgr->LoadAccountData(player);
         sAbyssalStorageMgr->SendFullSync(player);
+        sAbyssalStorageMgr->SendAccountSettings(player);
 
         if (sAbyssalStorageMgr->IsSharingEnabled())
         {
@@ -181,6 +182,10 @@ public:
 
         AbyssalPlayerData* data = GetAbyssalData(player);
         if (!data || !data->autoStoreEnabled)
+            return;
+
+        // Switched off for the account from the addon's rules window
+        if (!sAbyssalStorageMgr->IsAutoStoreOnLoot(player->GetSession()->GetAccountId()))
             return;
 
         // Don't auto-store items being materialized from vault
@@ -508,9 +513,17 @@ public:
             { "leave",   HandleShareLeaveCommand,   SEC_PLAYER, Console::No },
             { "kick",    HandleShareKickCommand,    SEC_PLAYER, Console::No },
         };
+        static ChatCommandTable ruleCommandTable =
+        {
+            { "store",  HandleRuleStoreCommand,  SEC_PLAYER, Console::No },
+            { "keep",   HandleRuleKeepCommand,   SEC_PLAYER, Console::No },
+            { "remove", HandleRuleRemoveCommand, SEC_PLAYER, Console::No },
+        };
         static ChatCommandTable absCommandTable =
         {
             { "share",    shareCommandTable },
+            { "rule",     ruleCommandTable },
+            { "autostore", HandleAutoStoreCommand, SEC_PLAYER, Console::No },
             { "withdraw", HandleWithdrawCommand,  SEC_PLAYER, Console::No },
             { "deposit",  HandleDepositCommand,   SEC_PLAYER, Console::No },
             { "sync",     HandleSyncCommand,      SEC_PLAYER, Console::No },
@@ -659,6 +672,93 @@ public:
         return true;
     }
 
+    // .abs rule store|keep|remove <itemId> — the addon's Store/Keep lists, saved per account
+    static bool SetItemRule(ChatHandler* handler, uint32 itemEntry, AbyssalItemRule rule)
+    {
+        if (!sAbyssalStorageMgr->IsEnabled())
+            return false;
+
+        Player* player = handler->GetSession()->GetPlayer();
+        if (!player)
+            return false;
+
+        ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(itemEntry);
+        if (!itemTemplate)
+        {
+            handler->SendSysMessage("Abyssal Storage: Invalid item.");
+            return true;
+        }
+
+        if (rule == AbyssalItemRule::Store && itemTemplate->GetMaxStackSize() <= 1)
+        {
+            handler->PSendSysMessage("Abyssal Storage: {} does not stack, so it cannot be stored.", BuildItemLink(itemEntry));
+            return true;
+        }
+
+        uint32 accountId = player->GetSession()->GetAccountId();
+        if (rule != AbyssalItemRule::None
+            && sAbyssalStorageMgr->GetItemRule(accountId, itemEntry) == AbyssalItemRule::None
+            && sAbyssalStorageMgr->GetItemRuleCount(accountId) >= ABYSSAL_MAX_ITEM_RULES)
+        {
+            handler->PSendSysMessage("Abyssal Storage: Your Store and Keep lists are full ({} items).", ABYSSAL_MAX_ITEM_RULES);
+            return true;
+        }
+
+        sAbyssalStorageMgr->SetItemRule(accountId, itemEntry, rule);
+
+        if (rule == AbyssalItemRule::Store)
+            handler->PSendSysMessage("Abyssal Storage: {} is now always stored.", BuildItemLink(itemEntry));
+        else if (rule == AbyssalItemRule::Keep)
+            handler->PSendSysMessage("Abyssal Storage: {} is now kept in your bags.", BuildItemLink(itemEntry));
+        else
+            handler->PSendSysMessage("Abyssal Storage: Removed {} from your lists.", BuildItemLink(itemEntry));
+        return true;
+    }
+
+    static bool HandleRuleStoreCommand(ChatHandler* handler, uint32 itemEntry)
+    {
+        return SetItemRule(handler, itemEntry, AbyssalItemRule::Store);
+    }
+
+    static bool HandleRuleKeepCommand(ChatHandler* handler, uint32 itemEntry)
+    {
+        return SetItemRule(handler, itemEntry, AbyssalItemRule::Keep);
+    }
+
+    static bool HandleRuleRemoveCommand(ChatHandler* handler, uint32 itemEntry)
+    {
+        return SetItemRule(handler, itemEntry, AbyssalItemRule::None);
+    }
+
+    // .abs autostore on|off
+    static bool HandleAutoStoreCommand(ChatHandler* handler, std::string state)
+    {
+        if (!sAbyssalStorageMgr->IsEnabled())
+            return false;
+
+        Player* player = handler->GetSession()->GetPlayer();
+        if (!player)
+            return false;
+
+        for (char& c : state)
+            c = std::tolower(static_cast<unsigned char>(c));
+
+        bool enable;
+        if (state == "on" || state == "1")
+            enable = true;
+        else if (state == "off" || state == "0")
+            enable = false;
+        else
+        {
+            handler->SendSysMessage("Abyssal Storage: Use .abs autostore on or .abs autostore off.");
+            return true;
+        }
+
+        sAbyssalStorageMgr->SetAutoStoreOnLoot(player->GetSession()->GetAccountId(), enable);
+        handler->PSendSysMessage("Abyssal Storage: Auto-store on loot is {} for this account.", enable ? "on" : "off");
+        return true;
+    }
+
     static bool HandleSyncCommand(ChatHandler* handler)
     {
         if (!sAbyssalStorageMgr->IsEnabled())
@@ -669,6 +769,7 @@ public:
             return false;
 
         sAbyssalStorageMgr->SendFullSync(player);
+        sAbyssalStorageMgr->SendAccountSettings(player);
         handler->SendSysMessage("Abyssal Storage: Sync complete.");
         return true;
     }

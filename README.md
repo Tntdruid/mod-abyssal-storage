@@ -22,6 +22,22 @@ Automatically deposits trade goods into a shared vault accessible by all charact
 | `/abs deposit` | Deposit all trade goods from inventory |
 | `/abs withdraw <itemId> [count]` | Withdraw items (omit count for all) |
 | `/abs sync` | Force re-sync from server |
+| `/abs rules` | Open the Store/Keep lists (also the **Rules** button in the vault window) |
+
+### Store and Keep lists
+
+Each account has its own lists, edited in the addon's rules window by dropping an item, shift-clicking a link or typing an item id. They apply to every character on the account, also when the account shares a vault with others.
+
+- **Store**: always vaulted, even items that are not trade goods (food, potions, scrolls). Only stackable items, since the vault does not keep enchants or durability.
+- **Keep**: never vaulted, not even trade goods.
+- **Auto-store on loot**: turn automatic vaulting off for the account. Deposit All still works.
+
+| Command | Description |
+|---|---|
+| `.abs rule store <itemId>` | Add an item to the Store list |
+| `.abs rule keep <itemId>` | Add an item to the Keep list |
+| `.abs rule remove <itemId>` | Remove an item from both lists |
+| `.abs autostore on\|off` | Turn auto-store on loot on or off for the account |
 
 ### Sharing a vault between accounts
 
@@ -69,5 +85,5 @@ AbyssalStorage.RandomBotAccountPrefix = ""
 1. Clone into `modules/mod-abyssal-storage`
 2. Re-run CMake and build
 3. Copy `conf/mod_abyssal_storage.conf.dist` to your server's config directory
-4. Run the files in `data/sql/db-characters/` (`abyssal_storage.sql`, `abyssal_storage_link.sql`, `abyssal_storage_invite.sql`) against your characters database
+4. Run the files in `data/sql/db-characters/` (`abyssal_storage.sql`, `abyssal_storage_link.sql`, `abyssal_storage_invite.sql`, `abyssal_storage_rule.sql`) against your characters database
 5. Copy the `addon/AbyssalStorage` folder into your WoW `Interface/AddOns` directory

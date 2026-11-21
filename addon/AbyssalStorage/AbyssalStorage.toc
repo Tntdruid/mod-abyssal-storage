@@ -1,6 +1,8 @@
 ## Interface: 30300
 ## Title: Abyssal Storage
 ## Notes: Interdimensional vault for trade goods
+## Version: 1.0.0
 ## SavedVariables: AbyssalStorageDB
 AbyssalStorage.lua
 AbyssalStorageUI.lua
+AbyssalStorageRules.lua
