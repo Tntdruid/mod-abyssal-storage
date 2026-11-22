@@ -25,6 +25,7 @@ Automatically deposits trade goods into a shared vault accessible by all charact
 | `/ps rules` | Open the Store/Keep lists (also the **Rules** button in the vault window) |
 
 ### Store and Keep lists
+<img width="501" height="603" alt="{591AD574-27BF-4386-9637-B8FB44A71118}" src="https://github.com/user-attachments/assets/007eac9d-3bf4-4795-a0c4-011b851acf25" />
 
 Each account has its own lists, edited in the addon's rules window by dropping an item, shift-clicking a link or typing an item id. They apply to every character on the account, also when the account shares a vault with others.
 
