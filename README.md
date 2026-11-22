@@ -13,6 +13,7 @@ Automatically deposits trade goods into a shared vault accessible by all charact
 - **Grid UI**: Searchable item grid with tooltips, opened via `/ps` or right-clicking the backpack
 - **Item tooltips**: Every item tooltip (bags, chat links, loot, auction house, professions) shows how many you have in the vault
 - **Real-time sync**: Vault state syncs on login and updates incrementally
+<img width="677" height="613" alt="{0264ADD5-8BDF-40E4-9C3B-1FAF46738D84}" src="https://github.com/user-attachments/assets/b47a1c84-f427-4757-ba7e-1f075ebeb7eb" />
 
 ## Commands
 
