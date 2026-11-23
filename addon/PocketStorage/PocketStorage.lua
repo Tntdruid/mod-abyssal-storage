@@ -58,6 +58,80 @@ function PocketStorage:GetItemCount(entry)
 end
 
 -- ============================================================================
+-- Item Info Loader
+-- ============================================================================
+
+-- GetItemInfo returns nil for items missing from the client cache (e.g. after the
+-- Cache folder is deleted) and never asks the server; setting a tooltip hyperlink does.
+-- Queries go out a few at a time, and the windows refresh as the answers arrive.
+local QUERIES_PER_TICK = 10
+local QUERY_TICK = 0.1
+local CHECK_INTERVAL = 1
+local MAX_TRIES = 3
+
+local queryTip = CreateFrame("GameTooltip", "PocketStorageItemQueryTip", UIParent, "GameTooltipTemplate")
+queryTip:SetOwner(UIParent, "ANCHOR_NONE")
+
+local queryQueue = {}   -- entries waiting to be queried
+local pendingItems = {} -- [entry] = number of checks without an answer
+local failedItems = {}  -- [entry] = true, gave up (e.g. item removed from the game)
+
+local queryFrame = CreateFrame("Frame")
+queryFrame:Hide()
+queryFrame:SetScript("OnUpdate", function(self, elapsed)
+    self.sendTimer = (self.sendTimer or 0) + elapsed
+    if self.sendTimer >= QUERY_TICK then
+        self.sendTimer = 0
+        for _ = 1, QUERIES_PER_TICK do
+            local entry = table.remove(queryQueue, 1)
+            if not entry then break end
+            queryTip:SetHyperlink("item:" .. entry)
+        end
+    end
+
+    self.checkTimer = (self.checkTimer or 0) + elapsed
+    if self.checkTimer < CHECK_INTERVAL then return end
+    self.checkTimer = 0
+
+    local resolved = false
+    for entry, tries in pairs(pendingItems) do
+        if GetItemInfo(entry) then
+            pendingItems[entry] = nil
+            resolved = true
+        elseif tries >= MAX_TRIES then
+            pendingItems[entry] = nil
+            failedItems[entry] = true
+        else
+            pendingItems[entry] = tries + 1
+            -- Ask again once the first round has gone out
+            if #queryQueue == 0 then queryQueue[#queryQueue + 1] = entry end
+        end
+    end
+
+    if resolved then
+        if PocketStorage.UpdateUI then PocketStorage:UpdateUI() end
+        if PocketStorage.UpdateRulesUI then PocketStorage:UpdateRulesUI() end
+    end
+
+    if not next(pendingItems) and #queryQueue == 0 then
+        self:Hide()
+    end
+end)
+
+-- Ask the server for an item the client cache does not know yet
+function PocketStorage:RequestItemInfo(entry)
+    if pendingItems[entry] or failedItems[entry] or GetItemInfo(entry) then return end
+    pendingItems[entry] = 0
+    queryQueue[#queryQueue + 1] = entry
+    queryFrame:Show()
+end
+
+-- Icon straight from the client's item data, known even before the item is cached
+function PocketStorage:GetItemIcon(entry)
+    return (GetItemIcon and GetItemIcon(entry)) or "Interface\\Icons\\INV_Misc_QuestionMark"
+end
+
+-- ============================================================================
 -- Server Communication
 -- ============================================================================
 

@@ -6,10 +6,6 @@ local WIDTH = 380
 
 local GOLD = { 1, 0.85, 0 }
 
--- Hidden tooltip used to ask the server for item data that isn't cached yet
-local scanTip = CreateFrame("GameTooltip", "PocketStorageRulesScanTip", UIParent, "GameTooltipTemplate")
-scanTip:SetOwner(UIParent, "ANCHOR_NONE")
-
 local function Solid(parent, layer, r, g, b, a)
     local tex = parent:CreateTexture(nil, layer)
     tex:SetTexture("Interface\\Buttons\\WHITE8X8")
@@ -297,17 +293,6 @@ local function CreateRulesFrame()
     -- Refresh
     -- ========================================================================
 
-    local retry = CreateFrame("Frame")
-    retry:Hide()
-    retry:SetScript("OnUpdate", function(self, elapsed)
-        self.t = (self.t or 0) + elapsed
-        if self.t > 1 then
-            self.t = 0
-            self:Hide()
-            PocketStorage:UpdateRulesUI()
-        end
-    end)
-
     function PocketStorage:UpdateRulesUI()
         if not frame:IsShown() then return end
 
@@ -329,18 +314,15 @@ local function CreateRulesFrame()
         FauxScrollFrame_Update(scroll, #entries, VISIBLE_ROWS, ROW_HEIGHT)
         local offset = FauxScrollFrame_GetOffset(scroll)
 
-        local waitingForItems = false
         for i, row in ipairs(rows) do
             local entry = entries[i + offset]
             if entry then
                 local name, _, quality, _, _, _, _, _, _, texture = GetItemInfo(entry)
-                if not name then
-                    waitingForItems = true
-                    scanTip:SetHyperlink("item:" .. entry)
-                end
+                -- The item info loader refreshes this window once the server answers
+                if not name then PocketStorage:RequestItemInfo(entry) end
                 local r, g, b = GetItemQualityColor(quality or 1)
                 row.itemEntry = entry
-                row.icon:SetTexture(texture or "Interface\\Icons\\INV_Misc_QuestionMark")
+                row.icon:SetTexture(texture or PocketStorage:GetItemIcon(entry))
                 row.text:SetText(name or ("Item #" .. entry))
                 row.text:SetTextColor(r, g, b)
                 row:Show()
@@ -350,7 +332,6 @@ local function CreateRulesFrame()
             end
         end
 
-        if waitingForItems then retry:Show() end
 
         tabStore:SetActive(isStore)
         tabKeep:SetActive(not isStore)

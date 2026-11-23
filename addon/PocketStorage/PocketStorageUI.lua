@@ -58,9 +58,10 @@ local function BuildDisplayList()
                 table.insert(displayList, { entry = entry, count = count, name = name, icon = icon })
             end
         else
-            -- Item not in client cache yet, show entry ID
+            -- Item not in client cache yet: show entry ID and ask the server for it
+            PocketStorage:RequestItemInfo(entry)
             if categoryMatches and searchFilter == "" then
-                table.insert(displayList, { entry = entry, count = count, name = "Item #" .. entry, icon = "Interface\\Icons\\INV_Misc_QuestionMark" })
+                table.insert(displayList, { entry = entry, count = count, name = "Item #" .. entry, icon = PocketStorage:GetItemIcon(entry) })
             end
         end
     end
@@ -633,14 +634,8 @@ end
 -- Request item info for all vault items on show
 -- ============================================================================
 
+-- Uncached items are requested while the list is built, and the item info
+-- loader refreshes the grid as they arrive
 PocketStorageFrame:SetScript("OnShow", function(self)
-    -- Trigger GetItemInfo for all items to populate client cache
-    for entry, _ in pairs(PocketStorage.items) do
-        GetItemInfo(entry)
-    end
-    -- Slight delay to let item info queries return
-    PocketStorage.SetTimer(0.5, function()
-        PocketStorage:UpdateUI()
-    end)
     PocketStorage:UpdateUI()
 end)

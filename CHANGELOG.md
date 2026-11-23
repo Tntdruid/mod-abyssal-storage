@@ -7,6 +7,11 @@ Releases from 1.0.0 on follow [Semantic Versioning](https://semver.org/spec/v2.0
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-11-23
+
+### Fixed
+- Items missing from the client cache (for example after deleting the WoW `Cache` folder) no longer stay as question marks in the vault and rules windows. The addon asks the server for them a few at a time and fills them in as they arrive. Update the addon to get the fix.
+
 ## [2.1.0] - 2026-11-21
 
 ### Added
@@ -80,7 +85,8 @@ Releases from 1.0.0 on follow [Semantic Versioning](https://semver.org/spec/v2.0
 - Item materialization logic.
 - The "Missing Reagent" error message is no longer shown in the UI.
 
-[Unreleased]: https://github.com/Tntdruid/mod-pocket-storage/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/Tntdruid/mod-pocket-storage/compare/v2.1.1...HEAD
+[2.1.1]: https://github.com/Tntdruid/mod-pocket-storage/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/Tntdruid/mod-pocket-storage/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/Tntdruid/mod-pocket-storage/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/Tntdruid/mod-pocket-storage/releases/tag/v1.0.0
