@@ -7,6 +7,15 @@ Releases from 1.0.0 on follow [Semantic Versioning](https://semver.org/spec/v2.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-11-23
+
+### Added
+- Items that combine a set into something new, such as Darkmoon cards into their deck, show the set's progress in their tooltip ("Warlords Deck 7/8") with the missing parts. Ctrl-click one in the vault window, or use `.ps combine <itemId>`, to build it with parts from bags and vault. Sets are found from the item's own spell, so every Darkmoon deck and other combine items work without a list.
+- Adding a Darkmoon card, or any part of such a set, to the Store or Keep list asks whether to add the whole set. The question now comes from the server, so it also works for rank-1 items such as Scroll of Spirit and for items the client has not cached.
+
+### Fixed
+- `.ps craft` only casts spells the character knows. Before, any spell with reagents could be cast through it, for example a Darkmoon card's spell, which made the deck without using up the card.
+
 ## [2.1.1] - 2026-11-23
 
 ### Fixed
@@ -85,7 +94,8 @@ Releases from 1.0.0 on follow [Semantic Versioning](https://semver.org/spec/v2.0
 - Item materialization logic.
 - The "Missing Reagent" error message is no longer shown in the UI.
 
-[Unreleased]: https://github.com/Tntdruid/mod-pocket-storage/compare/v2.1.1...HEAD
+[Unreleased]: https://github.com/Tntdruid/mod-pocket-storage/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/Tntdruid/mod-pocket-storage/compare/v2.1.1...v2.2.0
 [2.1.1]: https://github.com/Tntdruid/mod-pocket-storage/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/Tntdruid/mod-pocket-storage/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/Tntdruid/mod-pocket-storage/compare/v1.0.0...v2.0.0

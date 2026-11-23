@@ -8,6 +8,7 @@ Automatically deposits trade goods into a shared vault accessible by all charact
 
 - **Auto-deposit**: Trade goods are automatically vaulted when picked up
 - **Crafting integration**: Vault reagents appear in the TradeSkill UI and are materialized on demand when crafting
+- **Combining sets**: Items that combine a set into something new, such as Darkmoon cards into their deck, show how much of the set you have in bags and vault (for example "Warlords Deck 7/8") and what is missing. Ctrl-click the item in the vault window to build it once the set is complete.
 - **Quest integration**: Quest-required items are pulled from the vault automatically on turn-in
 - **Multi-craft**: "Create All" uses vault materials across the full batch
 - **Grid UI**: Searchable item grid with tooltips, opened via `/ps` or right-clicking the backpack
@@ -33,15 +34,16 @@ Each account has its own lists, edited in the addon's rules window by dropping a
 - **Store**: always vaulted, even items that are not trade goods (food, potions, scrolls). Only stackable items, since the vault does not keep enchants or durability.
 - **Keep**: never vaulted, not even trade goods.
 - **Auto-store on loot**: turn automatic vaulting off for the account. Deposit All still works.
-- **Ranks**: adding an item whose name ends in a rank numeral, such as Scroll of Spirit IV, asks whether to add every rank (Scroll of Spirit, Scroll of Spirit II, ...) or only that one.
+- **Sets and ranks**: adding an item that belongs to a set or a series asks whether to add all of it or only that item. A set is everything an item combines with, such as the eight cards of a Darkmoon deck; a series is every rank of an item such as Scroll of Spirit IV (Scroll of Spirit, Scroll of Spirit II, ...).
 
-Add `all` to a rule command to include every rank of the item.
+Add `all` to a rule command to include the whole set or every rank of the item.
 
 | Command | Description |
 |---|---|
 | `.ps rule store <itemId> [all]` | Add an item to the Store list |
 | `.ps rule keep <itemId> [all]` | Add an item to the Keep list |
 | `.ps rule remove <itemId> [all]` | Remove an item from both lists |
+| `.ps combine <itemId>` | Build what the item combines into (a Darkmoon card into its deck), taking the parts from bags and vault |
 | `.ps autostore on\|off` | Turn auto-store on loot on or off for the account |
 
 ### Sharing a vault between accounts

@@ -32,6 +32,17 @@ struct PocketPlayerData : public DataMap::Base
     uint32 pendingSpellId = 0;   // spell ID for multi-craft batch
     bool randomBotChecked = false; // true once isRandomBot has been resolved
     bool isRandomBot = false;      // cached result of the rndbot account check
+    std::unordered_set<uint32> combinesSent; // item entries whose combine recipe the addon has
+};
+
+// An item that combines a set of items into a new one, such as a Darkmoon card:
+// using it casts a spell that takes the rest of the set as reagents and creates an item
+struct PocketCombineRecipe
+{
+    uint32 spellId = 0;
+    uint32 resultItem = 0;
+    // Every part with its count, the item that casts the spell included
+    std::vector<std::pair<uint32, uint32>> parts;
 };
 
 PocketPlayerData* GetPocketData(Player* player);
@@ -94,6 +105,11 @@ public:
     void SetAutoStoreOnLoot(uint32 accountId, bool enabled);
     void SendAccountSettings(Player* player);
 
+    // nullptr when the item does not combine into anything. Cached, since item templates never change.
+    PocketCombineRecipe const* GetCombineRecipe(uint32 itemEntry);
+    // Tell the addon what an item combines into, once per login
+    void SendCombineRecipe(Player* player, uint32 itemEntry);
+
     // Messaging helpers
     void SendAddonMessage(Player* player, std::string const& message);
     void SendFullSync(Player* player);
@@ -135,6 +151,9 @@ private:
     // accountId -> Store/Keep rules and settings, for accounts with a character online
     std::unordered_map<uint32, AccountSettings> _accountSettings;
     std::unordered_set<uint32> _extraItems;
+    // itemEntry -> recipe; an empty recipe (no spell) marks an item that combines into nothing
+    std::unordered_map<uint32, PocketCombineRecipe> _combineRecipes;
+    std::mutex _combineMutex;
     std::mutex _storageMutex;
     bool _enabled = true;
     bool _sharingEnabled = true;

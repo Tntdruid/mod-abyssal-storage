@@ -8,6 +8,8 @@
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "QuestDef.h"
+#include "SpellInfo.h"
+#include "SpellMgr.h"
 #include "Log.h"
 #include <algorithm>
 #include <sstream>
@@ -645,6 +647,90 @@ void PocketStorageMgr::SendFullSync(Player* player)
     }
 
     SendAddonMessage(player, msg);
+
+    // The addon forgets recipes on a full sync, so send them again
+    if (PocketPlayerData* data = GetPocketData(player))
+        data->combinesSent.clear();
+    for (auto const& [entry, count] : items)
+        SendCombineRecipe(player, entry);
+}
+
+PocketCombineRecipe const* PocketStorageMgr::GetCombineRecipe(uint32 itemEntry)
+{
+    std::lock_guard<std::mutex> lock(_combineMutex);
+
+    auto cached = _combineRecipes.find(itemEntry);
+    if (cached != _combineRecipes.end())
+        return cached->second.spellId ? &cached->second : nullptr;
+
+    PocketCombineRecipe& recipe = _combineRecipes[itemEntry];
+
+    ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(itemEntry);
+    if (!itemTemplate)
+        return nullptr;
+
+    // An on-use spell that takes reagents and creates an item
+    for (auto const& itemSpell : itemTemplate->Spells)
+    {
+        if (itemSpell.SpellId <= 0 || itemSpell.SpellTrigger != ITEM_SPELLTRIGGER_ON_USE)
+            continue;
+
+        SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(itemSpell.SpellId);
+        if (!spellInfo)
+            continue;
+
+        uint32 resultItem = 0;
+        for (SpellEffectInfo const& effect : spellInfo->GetEffects())
+            if (effect.Effect == SPELL_EFFECT_CREATE_ITEM && effect.ItemType)
+                resultItem = effect.ItemType;
+
+        std::vector<std::pair<uint32, uint32>> parts = { { itemEntry, 1 } };
+        for (uint8 i = 0; i < MAX_SPELL_REAGENTS; ++i)
+        {
+            if (spellInfo->Reagent[i] <= 0 || !spellInfo->ReagentCount[i])
+                continue;
+
+            uint32 reagent = spellInfo->Reagent[i];
+            auto part = std::find_if(parts.begin(), parts.end(), [reagent](auto const& p) { return p.first == reagent; });
+            if (part != parts.end())
+                part->second += spellInfo->ReagentCount[i];
+            else
+                parts.emplace_back(reagent, spellInfo->ReagentCount[i]);
+        }
+
+        if (!resultItem || parts.size() < 2)
+            continue;
+
+        recipe.spellId = spellInfo->Id;
+        recipe.resultItem = resultItem;
+        recipe.parts = std::move(parts);
+        return &recipe;
+    }
+
+    return nullptr;
+}
+
+// COMBINE:<item>:<result item>:<part>*<count>,<part>*<count>,...
+void PocketStorageMgr::SendCombineRecipe(Player* player, uint32 itemEntry)
+{
+    PocketCombineRecipe const* recipe = GetCombineRecipe(itemEntry);
+    if (!recipe)
+        return;
+
+    PocketPlayerData* data = GetPocketData(player);
+    if (!data || !data->combinesSent.insert(itemEntry).second)
+        return;
+
+    std::string msg = "COMBINE:" + std::to_string(itemEntry) + ":" + std::to_string(recipe->resultItem) + ":";
+    for (std::size_t i = 0; i < recipe->parts.size(); ++i)
+    {
+        if (i)
+            msg += ",";
+        msg += std::to_string(recipe->parts[i].first) + "*" + std::to_string(recipe->parts[i].second);
+    }
+
+    // Short enough for one packet: a recipe has at most 8 reagents
+    SendAddonMessage(player, msg);
 }
 
 void PocketStorageMgr::SendItemUpdate(Player* player, uint32 itemEntry, uint32 count)
@@ -675,6 +761,12 @@ void PocketStorageMgr::BroadcastItemCount(uint32 storageId, uint32 itemEntry)
 
     // The addon treats an update with count 0 as a delete
     for (ObjectGuid const& guid : members)
+    {
         if (Player* member = ObjectAccessor::FindConnectedPlayer(guid))
+        {
             SendItemUpdate(member, itemEntry, count);
+            if (count)
+                SendCombineRecipe(member, itemEntry);
+        }
+    }
 }

@@ -287,6 +287,7 @@ local function CreateCell(index)
             GameTooltip:AddDoubleLine("Bags", tostring(bags), 0.78, 0.82, 0.88, 1, 1, 1)
             GameTooltip:AddDoubleLine("Pocket Storage", tostring(stored), 0.78, 0.82, 0.88, 0.2, 1, 0.6)
             GameTooltip:AddDoubleLine("Total", tostring(bags + stored), 1, 0.85, 0, 1, 0.85, 0)
+            PocketStorage:AddCombineLines(GameTooltip, self.itemEntry, true)
             GameTooltip:Show()
         end
     end)
@@ -294,10 +295,12 @@ local function CreateCell(index)
         GameTooltip:Hide()
     end)
 
-    -- Click — withdraw dialog; Shift-click — stack split
+    -- Click — withdraw dialog; Shift-click — stack split; Ctrl-click — build what it combines into
     cell:SetScript("OnClick", function(self)
         if self.itemEntry and self.itemCount then
-            if IsShiftKeyDown() and self.itemCount > 1 then
+            if IsControlKeyDown() and PocketStorage.combines[self.itemEntry] then
+                PocketStorage:Combine(self.itemEntry)
+            elseif IsShiftKeyDown() and self.itemCount > 1 then
                 OpenStackSplitFrame(self.itemCount, self, "BOTTOMLEFT", "TOPLEFT")
             else
                 PocketStorage:ShowWithdrawDialog(self.itemEntry, self.itemCount)

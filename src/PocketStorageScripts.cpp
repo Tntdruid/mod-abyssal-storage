@@ -15,6 +15,7 @@
 #include "Spell.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
+#include "StringFormat.h"
 #include "Util.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
@@ -539,6 +540,7 @@ public:
             { "deposit",  HandleDepositCommand,   SEC_PLAYER, Console::No },
             { "sync",     HandleSyncCommand,      SEC_PLAYER, Console::No },
             { "craft",    HandleCraftCommand,      SEC_PLAYER, Console::No },
+            { "combine",  HandleCombineCommand,    SEC_PLAYER, Console::No },
             { "link",     HandleLinkCommand,       SEC_ADMINISTRATOR, Console::Yes },
             { "unlink",   HandleUnlinkCommand,     SEC_ADMINISTRATOR, Console::Yes },
         };
@@ -716,8 +718,40 @@ public:
         return ranks;
     }
 
-    // .ps rule store|keep|remove <itemId> [all] — the addon's Store/Keep lists, saved per account.
-    // With "all", every rank of the item (Scroll of Spirit, Scroll of Spirit II, ...) gets the rule.
+    // Items that belong together with an item: the parts of what it combines into
+    // (the eight Darkmoon cards of a deck), or else its ranks
+    struct ItemSeries
+    {
+        std::vector<ItemTemplate const*> items;
+        std::string description; // "8 items of Warlords Deck" or "8 ranks of Scroll of Spirit"
+        char kind;               // 'C' combine set, 'R' ranks
+    };
+
+    static ItemSeries FindItemSeries(ItemTemplate const* item)
+    {
+        ItemSeries series;
+        if (PocketCombineRecipe const* recipe = sPocketStorageMgr->GetCombineRecipe(item->ItemId))
+        {
+            for (auto const& [entry, count] : recipe->parts)
+                if (ItemTemplate const* part = sObjectMgr->GetItemTemplate(entry))
+                    series.items.push_back(part);
+
+            ItemTemplate const* result = sObjectMgr->GetItemTemplate(recipe->resultItem);
+            series.description = std::to_string(series.items.size()) + " items of " + (result ? result->Name1 : "the set");
+            series.kind = 'C';
+            return series;
+        }
+
+        series.items = FindItemRanks(item);
+        series.description = std::to_string(series.items.size()) + " ranks of " + StripRank(item->Name1);
+        series.kind = 'R';
+        return series;
+    }
+
+    // .ps rule store|keep|remove <itemId> [all|ask] — the addon's Store/Keep lists, saved per account.
+    // "all" gives the rule to every item of the series (Scroll of Spirit I-VIII, the cards of a
+    // Darkmoon deck). "ask" is the addon's: for an item with a series it replies SERIES:<list>:
+    // <item>:<C|R>:<count>:<description> so the addon can ask, and otherwise adds just the item.
     static bool SetItemRule(ChatHandler* handler, uint32 itemEntry, PocketItemRule rule, Optional<std::string> const& scope)
     {
         if (!sPocketStorageMgr->IsEnabled())
@@ -734,21 +768,33 @@ public:
             return true;
         }
 
-        bool allRanks = false;
-        if (scope)
+        std::string word = scope.value_or("");
+        for (char& c : word)
+            c = std::tolower(static_cast<unsigned char>(c));
+        if (!word.empty() && word != "all" && word != "ask")
         {
-            std::string word = *scope;
-            for (char& c : word)
-                c = std::tolower(static_cast<unsigned char>(c));
-            if (word != "all")
-            {
-                handler->SendSysMessage("Pocket Storage: Add \"all\" after the item id to include every rank, or nothing for just this item.");
-                return true;
-            }
-            allRanks = true;
+            handler->SendSysMessage("Pocket Storage: Add \"all\" after the item id to include every item of its set or every rank, or nothing for just this item.");
+            return true;
         }
 
-        std::vector<ItemTemplate const*> items = allRanks ? FindItemRanks(itemTemplate) : std::vector<ItemTemplate const*>{ itemTemplate };
+        std::vector<ItemTemplate const*> items = { itemTemplate };
+        std::string seriesDescription;
+        if (!word.empty())
+        {
+            ItemSeries series = FindItemSeries(itemTemplate);
+            if (series.items.size() > 1)
+            {
+                if (word == "ask")
+                {
+                    char list = rule == PocketItemRule::Store ? 'S' : rule == PocketItemRule::Keep ? 'K' : 'N';
+                    sPocketStorageMgr->SendAddonMessage(player, Acore::StringFormat("SERIES:{}:{}:{}:{}:{}",
+                        list, itemEntry, series.kind, series.items.size(), series.description));
+                    return true;
+                }
+                items = std::move(series.items);
+                seriesDescription = std::move(series.description);
+            }
+        }
 
         // The vault keeps only entry and count, so unstackable items cannot be stored
         std::vector<uint32> entries;
@@ -780,8 +826,10 @@ public:
         for (uint32 entry : entries)
             sPocketStorageMgr->SetItemRule(accountId, entry, rule);
 
+        // Unstackable items of a series are left out of the Store list, so count what was added
         std::string what = entries.size() == 1 ? BuildItemLink(entries.front())
-            : std::to_string(entries.size()) + " ranks of " + StripRank(itemTemplate->Name1);
+            : entries.size() == items.size() ? seriesDescription
+            : std::to_string(entries.size()) + " of the " + seriesDescription + " (the others do not stack)";
 
         if (rule == PocketItemRule::Store)
             handler->PSendSysMessage("Pocket Storage: {} {} now always stored.", what, entries.size() == 1 ? "is" : "are");
@@ -1175,8 +1223,10 @@ public:
         if (!player)
             return false;
 
+        // Only recipes the player knows; casting any other spell with reagents would skip its
+        // requirements (a Darkmoon card spell, for one, would create the deck without using the card)
         SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellId);
-        if (!spellInfo)
+        if (!spellInfo || !player->HasSpell(spellId))
         {
             handler->SendSysMessage("Pocket Storage: Invalid spell.");
             return true;
@@ -1355,6 +1405,90 @@ public:
         // Cast once — OnSpellCast will chain the remaining crafts
         player->CastSpell(player, spellId, false);
 
+        return true;
+    }
+
+    // .ps combine <itemId> — use an item that combines a set (a Darkmoon card into its deck),
+    // with the parts taken from bags and vault. The item itself is the cast item, so the spell
+    // uses it up as it does when the player right-clicks it; the spell check above
+    // materializes the other parts from the vault.
+    static bool HandleCombineCommand(ChatHandler* handler, uint32 itemEntry)
+    {
+        if (!sPocketStorageMgr->IsEnabled())
+            return false;
+
+        Player* player = handler->GetSession()->GetPlayer();
+        if (!player)
+            return false;
+
+        PocketCombineRecipe const* recipe = sPocketStorageMgr->GetCombineRecipe(itemEntry);
+        if (!recipe)
+        {
+            handler->SendSysMessage("Pocket Storage: That item does not combine into anything.");
+            return true;
+        }
+
+        uint32 storageId = sPocketStorageMgr->GetStorageId(player);
+
+        std::string missing;
+        for (auto const& [entry, count] : recipe->parts)
+        {
+            if (player->GetItemCount(entry) + sPocketStorageMgr->GetItemCount(storageId, entry) >= count)
+                continue;
+            if (!missing.empty())
+                missing += ", ";
+            missing += BuildItemLink(entry);
+        }
+
+        if (!missing.empty())
+        {
+            handler->PSendSysMessage("Pocket Storage: Still missing {} for {}.", missing, BuildItemLink(recipe->resultItem));
+            return true;
+        }
+
+        // The cast item must be in the bags, not the bank
+        Item* castItem = player->GetItemByEntry(itemEntry);
+        if (castItem && !Player::IsInventoryPos(castItem->GetPos()))
+            castItem = nullptr;
+
+        PocketPlayerData* data = GetPocketData(player);
+        if (!castItem)
+        {
+            ItemPosCountVec dest;
+            if (player->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, itemEntry, 1) != EQUIP_ERR_OK)
+            {
+                handler->SendSysMessage("Pocket Storage: Not enough bag space.");
+                return true;
+            }
+
+            // Withdraw before creating: another character sharing the vault may have taken it
+            if (!sPocketStorageMgr->WithdrawItem(storageId, itemEntry, 1))
+            {
+                handler->PSendSysMessage("Pocket Storage: Still missing {} for {}.", BuildItemLink(itemEntry), BuildItemLink(recipe->resultItem));
+                return true;
+            }
+
+            if (data)
+                data->isMaterializing = true;
+            castItem = player->StoreNewItem(dest, itemEntry, true);
+            if (data)
+            {
+                data->isMaterializing = false;
+                // Goes back to the vault like other leftovers if the cast does not happen
+                if (castItem)
+                    data->materializedItems.insert(castItem->GetGUID().GetCounter());
+            }
+
+            if (!castItem)
+            {
+                sPocketStorageMgr->DepositItem(storageId, itemEntry, 1);
+                handler->SendSysMessage("Pocket Storage: Not enough bag space.");
+                return true;
+            }
+            sPocketStorageMgr->BroadcastItemCount(storageId, itemEntry);
+        }
+
+        player->CastSpell(player, recipe->spellId, false, castItem);
         return true;
     }
 };

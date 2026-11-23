@@ -4,6 +4,9 @@ PocketStorage.items = {} -- { [itemEntry] = count }
 PocketStorage.PREFIX = "PCKT"
 -- Per-account Store/Keep lists, mirrored from the server
 PocketStorage.rules = { store = {}, keep = {} } -- { [itemEntry] = true }
+-- What vault items combine into, such as a Darkmoon card into its deck, from the server:
+-- { [itemEntry] = { result = itemEntry, parts = { { entry = N, count = N }, ... } } }
+PocketStorage.combines = {}
 PocketStorage.autoStore = true
 PocketStorage.activeRuleTab = "store"
 
@@ -157,21 +160,21 @@ function PocketStorage:ToItemEntry(input)
     return tonumber(input) or self:EntryFromLink(tostring(input))
 end
 
-local function SendAddRule(entry, listKey, allRanks)
-    PocketStorage:SendCommand("ps rule " .. (listKey == "keep" and "keep " or "store ") .. entry .. (allRanks and " all" or ""))
+local function SendAddRule(entry, listKey, scope)
+    PocketStorage:SendCommand("ps rule " .. (listKey == "keep" and "keep " or "store ") .. entry .. (scope and (" " .. scope) or ""))
 end
 
-StaticPopupDialogs["POCKET_RULE_ALL_RANKS"] = {
-    text = "Add every rank of %s to your %s list, or only the one you picked?",
-    button1 = "All ranks",
+StaticPopupDialogs["POCKET_RULE_SERIES"] = {
+    text = "Add all %s to your %s list, or only the one you picked?",
+    button1 = "All",
     button2 = "Only this",
     OnAccept = function(self, data)
-        SendAddRule(data.entry, data.listKey, true)
+        SendAddRule(data.entry, data.listKey, "all")
     end,
     -- Escape also cancels; only the button adds the single item
     OnCancel = function(self, data, reason)
         if reason == "clicked" then
-            SendAddRule(data.entry, data.listKey, false)
+            SendAddRule(data.entry, data.listKey)
         end
     end,
     timeout = 0,
@@ -180,26 +183,82 @@ StaticPopupDialogs["POCKET_RULE_ALL_RANKS"] = {
     preferredIndex = 3,
 }
 
+-- The server answers "ask" with SERIES when the item has ranks or is part of a set,
+-- and otherwise adds just the item
 function PocketStorage:AddRule(input, listKey)
     local entry = self:ToItemEntry(input)
     if not entry then
         DEFAULT_CHAT_FRAME:AddMessage("|cffff4444Pocket Storage: Drop an item, shift-click a link or type an item ID.|r")
         return
     end
+    SendAddRule(entry, listKey, "ask")
+end
 
-    -- Ranked items such as "Scroll of Spirit IV": offer to add the whole series
-    local name = GetItemInfo(entry)
-    local baseName = name and name:match("^(.+) [IVXL]+$")
-    if baseName then
-        local listName = listKey == "keep" and "|cff00ff00Keep|r" or "|cffffd700Store|r"
-        local dialog = StaticPopup_Show("POCKET_RULE_ALL_RANKS", "|cffffffff" .. baseName .. "|r", listName)
-        if dialog then
-            dialog.data = { entry = entry, listKey = listKey }
-            return
+-- SERIES:<S|K|N>:<item>:<C|R>:<count>:<description>
+function PocketStorage:HandleSeries(payload)
+    local list, entry, description = (payload or ""):match("^([SKN]):(%d+):[CR]:%d+:(.+)$")
+    if not list or list == "N" then return end
+
+    local listKey = list == "K" and "keep" or "store"
+    local listName = listKey == "keep" and "|cff00ff00Keep|r" or "|cffffd700Store|r"
+    local dialog = StaticPopup_Show("POCKET_RULE_SERIES", "|cffffffff" .. description .. "|r", listName)
+    if dialog then
+        dialog.data = { entry = tonumber(entry), listKey = listKey }
+    end
+end
+
+-- COMBINE:<item>:<result>:<part>*<count>,...
+function PocketStorage:HandleCombine(payload)
+    local entry, result, partList = (payload or ""):match("^(%d+):(%d+):(.+)$")
+    if not entry then return end
+
+    local parts = {}
+    for part, count in partList:gmatch("(%d+)%*(%d+)") do
+        parts[#parts + 1] = { entry = tonumber(part), count = tonumber(count) }
+    end
+    self.combines[tonumber(entry)] = { result = tonumber(result), parts = parts }
+end
+
+-- Build what an item combines into, taking the parts from bags and vault
+function PocketStorage:Combine(entry)
+    self:SendCommand("ps combine " .. entry)
+end
+
+-- Parts of an item's set the player has in bags or vault, and the names of the rest
+function PocketStorage:GetCombineProgress(entry)
+    local combine = self.combines[entry]
+    if not combine then return nil end
+
+    local have, missing = 0, {}
+    for _, part in ipairs(combine.parts) do
+        if (GetItemCount(part.entry) or 0) + self:GetItemCount(part.entry) >= part.count then
+            have = have + 1
+        else
+            local name = GetItemInfo(part.entry)
+            if not name then self:RequestItemInfo(part.entry) end
+            missing[#missing + 1] = name or ("Item #" .. part.entry)
         end
     end
+    return have, #combine.parts, missing
+end
 
-    SendAddRule(entry, listKey, false)
+-- "Warlords Deck: 7/8" plus what is missing, or how to build it when complete
+function PocketStorage:AddCombineLines(tooltip, entry, showBuildHint)
+    local have, total, missing = self:GetCombineProgress(entry)
+    if not have then return end
+
+    local result = self.combines[entry].result
+    local resultName = GetItemInfo(result)
+    if not resultName then self:RequestItemInfo(result) end
+
+    tooltip:AddLine(" ")
+    tooltip:AddDoubleLine(resultName or ("Item #" .. result), have .. "/" .. total,
+        1, 0.85, 0, have == total and 0.2 or 1, have == total and 1 or 0.5, have == total and 0.2 or 0.5)
+    if #missing > 0 then
+        tooltip:AddLine("Missing: " .. table.concat(missing, ", "), 0.6, 0.6, 0.6, true)
+    elseif showBuildHint then
+        tooltip:AddLine("Ctrl-click to build it", 0.2, 1, 0.2)
+    end
 end
 
 function PocketStorage:RemoveRule(entry)
@@ -244,6 +303,10 @@ function PocketStorage:HandleMessage(msg)
     elseif cmd == "AUTO" then
         self.autoStore = payload == "1"
         RefreshRules()
+    elseif cmd == "SERIES" then
+        self:HandleSeries(payload)
+    elseif cmd == "COMBINE" then
+        self:HandleCombine(payload)
     end
 end
 
@@ -406,6 +469,7 @@ local function AddVaultLine(tooltip)
     local count = PocketStorage:GetItemCount(entry)
     if count > 0 then
         tooltip:AddDoubleLine(VAULT_LINE, tostring(count), 0.78, 0.82, 0.88, 0.2, 1, 0.6)
+        PocketStorage:AddCombineLines(tooltip, entry, false)
         tooltip:Show()
     end
 end
